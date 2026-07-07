@@ -92,6 +92,11 @@ function buildDoc(page) {
     season: getSelect(props["Temporada"]) || "",
     tags: getMultiSelect(props["Etiquetas"]),
     date: (page.created_time || "").slice(0, 10),
+    // Timestamp completo (fecha + hora + zona, formato ISO 8601), tal cual
+    // lo da Notion. "date" se mantiene igual (solo YYYY-MM-DD) porque la
+    // interfaz y el gráfico de telemetría ya cuentan con ese formato; este
+    // campo es un añadido para quien necesite la hora exacta de subida.
+    uploadedAt: page.created_time || null,
     url: page.url,
   };
 }
