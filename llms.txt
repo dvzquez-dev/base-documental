@@ -1,19 +1,19 @@
 # Solaris Document Console — datos para agentes / IA
-
+ 
 > Índice de documentos internos y datasheets de electrónica del equipo de
 > cohetería universitaria Solaris (Aerotech). Datos públicos, de solo
 > lectura, sin autenticación. Se sincronizan desde Notion automáticamente
 > cada ~30 minutos.
-
+ 
 ## Endpoints (JSON, GET simple, sin API key)
-
+ 
 - Todo en un solo archivo: https://dvzquez-dev.github.io/base-documental/data/all.json
 - Solo documentos internos: https://dvzquez-dev.github.io/base-documental/data/docs.json
 - Solo datasheets de electrónica: https://dvzquez-dev.github.io/base-documental/data/datasheets.json
 - Metadatos (hora de la última sincronización): https://dvzquez-dev.github.io/base-documental/data/meta.json
-
+ 
 ## Esquema — docs.json (array de objetos)
-
+ 
 - `id` (number | null): identificador interno. **No es único**: se reutiliza
   el mismo número entre temporadas distintas (p.ej. `id: 2009` existe tanto
   en la temporada 2024/25 como en la 2025/26, son documentos distintos).
@@ -33,27 +33,31 @@
 - `season` (string): "2024/25" o "2025/26".
 - `tags` (string[]): etiquetas libres tal como están en Notion.
 - `date` (string, YYYY-MM-DD): fecha de subida.
+- `uploadedAt` (string ISO 8601 | null): fecha y hora exactas de subida
+  (con zona horaria), tal como las devuelve Notion — p.ej.
+  `"2026-07-06T18:23:00.000Z"`. `date` es solo la parte de fecha de este
+  mismo valor, mantenida por compatibilidad con la interfaz.
 - `url` (string): enlace a la página original en Notion. Recomendado:
   localizar el documento por `docCode` en el índice y luego usar este `url`
   para leer su contenido completo (el índice solo trae metadata, no el
   cuerpo del documento).
-
+ 
 ## Esquema — datasheets.json (array de objetos)
-
+ 
 - `name`, `tipo`, `fabricante`, `desc`, `uso` (string).
 - `proyectos` (string[]): proyectos donde se usa el componente.
 - `interfaces` (string[]): interfaces eléctricas (SPI, I²C, UART, etc.).
 - `enlace` (string): URL al PDF del datasheet del fabricante.
 - `url` (string): enlace a la página en Notion.
-
+ 
 ## Esquema — meta.json
-
+ 
 - `updatedAt` (string, ISO datetime): última sincronización con Notion.
 - `docsCount`, `datasheetsCount` (number).
 - `source` (string).
-
+ 
 ## Notas para agentes
-
+ 
 - No se necesita ninguna clave de Notion para leer estos archivos: son un
   espejo público de solo lectura, no la fuente original.
 - Frescura de los datos: hasta ~30 minutos de desfase respecto a Notion.
@@ -63,3 +67,4 @@
   autenticado en ese workspace para abrirse.
 - Estos archivos son de solo lectura: no hay ningún endpoint para escribir,
   crear o modificar documentos desde aquí.
+ 
