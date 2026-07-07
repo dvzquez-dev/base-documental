@@ -2,9 +2,10 @@ name: Sync Notion data
 
 on:
   schedule:
-    # Cada 5 minutos. GitHub puede retrasarlo unos minutos en horas de carga alta,
-    # y lo desactiva automáticamente si el repo lleva 60 días sin actividad
-    # (basta con volver a activarlo en la pestaña Actions).
+    # Cada 5 minutos (el mínimo que permite GitHub). GitHub no garantiza el
+    # segundo exacto y puede retrasarlo en horas de carga alta, y desactiva
+    # el cron automáticamente si el repo lleva 60 días sin actividad (basta
+    # con reactivarlo en la pestaña Actions).
     - cron: "*/5 * * * *"
   workflow_dispatch: {}   # permite lanzarlo a mano desde la pestaña Actions
 
