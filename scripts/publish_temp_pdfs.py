@@ -236,11 +236,18 @@ def main():
             # siguiente ciclo lo reintente, en vez de perder el aviso.
             drive_deleted = False
             try:
-                drive.files().delete(fileId=row["drive_file_id"]).execute()
+                # OJO: files().delete() (borrado permanente/bypass-trash) solo
+                # lo permite Drive si eres el DUENO del archivo, aunque tengas
+                # rol Editor. Como la service account nunca es duena (Daniel
+                # es el dueno de todo lo que hay en su unidad), usamos
+                # files().update(trashed=True) en su lugar: mover a la
+                # papelera SI esta permitido con rol Editor, y de regalo da
+                # ~30 dias de margen de recuperacion por si algo sale mal.
+                drive.files().update(fileId=row["drive_file_id"], body={"trashed": True}).execute()
                 drive_deleted = True
-                print(f"Copia de staging en Drive borrada: {filename}")
+                print(f"Copia de staging en Drive movida a la papelera: {filename}")
             except Exception as exc:
-                print(f"Aviso: no se pudo borrar la copia de staging en Drive ({filename}), se reintentara en el proximo ciclo: {exc}", file=sys.stderr)
+                print(f"Aviso: no se pudo mover a la papelera la copia de staging en Drive ({filename}), se reintentara en el proximo ciclo: {exc}", file=sys.stderr)
  
             if drive_deleted:
                 write_row(sheets, row["row_number"], {"estado": "EXPIRADO"})
