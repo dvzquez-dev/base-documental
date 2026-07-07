@@ -1,0 +1,26 @@
+name: Publicar PDFs temporales Solaris
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # cada 15 minutos
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install google-api-python-client google-auth
+
+      - name: Publicar y retirar PDFs pendientes
+        env:
+          GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+        run: python scripts/publish_temp_pdfs.py
