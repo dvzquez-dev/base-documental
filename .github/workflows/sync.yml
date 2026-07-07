@@ -1,0 +1,35 @@
+name: Sync Notion data
+
+on:
+  schedule:
+    # Cada 30 minutos. GitHub puede retrasarlo unos minutos en horas de carga alta,
+    # y lo desactiva automáticamente si el repo lleva 60 días sin actividad
+    # (basta con volver a activarlo en la pestaña Actions).
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}   # permite lanzarlo a mano desde la pestaña Actions
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Consultar Notion y regenerar data/*.json
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: node scripts/sync-notion.mjs
+
+      - name: Commit si hay cambios
+        run: |
+          git config user.name "solaris-sync-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/docs.json data/datasheets.json data/meta.json
+          git diff --cached --quiet || git commit -m "chore: sync data from Notion [skip ci]"
+          git push
