@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solaris // Archivo Técnico</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A0E13;
+    --bg-2:#0D1218;
+    --panel:#11161D;
+    --panel-2:#151C24;
+    --grid:#1C2731;
+    --hairline:#232F3A;
+    --text:#E7EDF3;
+    --text-dim:#8FA0AF;
+    --text-faint:#566472;
+    --amber:#F2B441;
+    --prop:#E14B3D;
+    --struct:#4C8DD9;
+    --dyn:#9B6BE0;
+    --elec:#38B27A;
+    --coord:#8C97A3;
+    --general:#F2B441;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 100%);
+    color:var(--text);
+    font-family:'IBM Plex Sans', system-ui, sans-serif;
+    min-height:100vh;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 42px 42px;
+    background-attachment: fixed;
+  }
+  a{color:inherit;}
+  ::selection{background:var(--amber); color:#0A0E13;}
+  :focus-visible{outline:2px solid var(--amber); outline-offset:2px;}
+
+  .wrap{max-width:1180px; margin:0 auto; padding:28px 20px 80px;}
+
+  /* HEADER */
+  header.console{
+    border:1px solid var(--hairline);
+    background:linear-gradient(180deg, rgba(21,28,36,0.9), rgba(17,22,29,0.9));
+    border-radius:var(--radius);
+    padding:22px 26px;
+    display:flex; flex-wrap:wrap; gap:18px; justify-content:space-between; align-items:flex-end;
+    position:relative;
+    overflow:hidden;
+  }
+  header.console::before{
+    content:"";
+    position:absolute; inset:0;
+    background:radial-gradient(700px 200px at 15% -20%, rgba(242,180,65,0.10), transparent 60%);
+    pointer-events:none;
+  }
+  .brand-eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11.5px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--amber); margin:0 0 6px;
+  }
+  .brand-title{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:clamp(22px,3.4vw,32px); font-weight:700; margin:0;
+    letter-spacing:.01em;
+  }
+  .brand-sub{color:var(--text-dim); font-size:13.5px; margin-top:6px; max-width:480px;}
+  .console-meta{
+    font-family:'IBM Plex Mono', monospace;
+    display:flex; gap:22px; flex-wrap:wrap;
+  }
+  .console-meta .m{text-align:right;}
+  .console-meta .m .n{font-size:22px; font-weight:700; color:var(--text);}
+  .console-meta .m .l{font-size:10.5px; color:var(--text-faint); letter-spacing:.08em; text-transform:uppercase;}
+
+  /* TELEMETRY CHART */
+  .telemetry{
+    margin-top:18px;
+    border:1px solid var(--hairline);
+    background:var(--panel);
+    border-radius:var(--radius);
+    padding:16px 20px 10px;
+  }
+  .telemetry-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;}
+  .telemetry-head h2{font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--text-dim); margin:0; font-weight:600;}
+  .telemetry-head span{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-faint);}
+  svg.chart{width:100%; height:130px; display:block; overflow:visible;}
+  .chart-axis-label{font-family:'IBM Plex Mono',monospace; font-size:9.5px; fill:var(--text-faint);}
+  .chart-dot{fill:var(--amber);}
+  .chart-tooltip{font-family:'IBM Plex Mono',monospace; font-size:10px; fill:var(--text);}
+
+  /* STAT CARDS */
+  .stats{
+    margin-top:16px;
+    display:grid; grid-template-columns:repeat(6, 1fr); gap:10px;
+  }
+  @media (max-width:900px){ .stats{grid-template-columns:repeat(3,1fr);} }
+  @media (max-width:560px){ .stats{grid-template-columns:repeat(2,1fr);} }
+  .stat-card{
+    border:1px solid var(--hairline); background:var(--panel);
+    border-radius:8px; padding:12px 12px 10px; cursor:pointer;
+    border-left:3px solid var(--c);
+    transition:background .15s ease, transform .1s ease;
+    user-select:none;
+  }
+  .stat-card:hover{background:var(--panel-2);}
+  .stat-card.active{background:var(--panel-2); box-shadow:0 0 0 1px var(--c) inset;}
+  .stat-card .num{font-family:'IBM Plex Mono',monospace; font-size:22px; font-weight:700; color:var(--c);}
+  .stat-card .lbl{font-size:11.5px; color:var(--text-dim); margin-top:2px; line-height:1.25;}
+
+  /* TABS */
+  .tabs{display:flex; gap:6px; margin-top:26px; border-bottom:1px solid var(--hairline);}
+  .tab-btn{
+    font-family:'IBM Plex Mono',monospace; font-size:12.5px; letter-spacing:.04em;
+    background:none; border:none; color:var(--text-faint); padding:10px 4px 12px; cursor:pointer;
+    border-bottom:2px solid transparent; margin-right:22px; text-transform:uppercase;
+  }
+  .tab-btn.active{color:var(--amber); border-bottom-color:var(--amber);}
+  .tab-btn:hover{color:var(--text);}
+
+  /* CONTROLS */
+  .controls{margin-top:18px; display:flex; flex-wrap:wrap; gap:10px; align-items:center;}
+  .search-box{
+    flex:1 1 260px; position:relative;
+  }
+  .search-box input{
+    width:100%; background:var(--panel); border:1px solid var(--hairline); color:var(--text);
+    border-radius:8px; padding:11px 14px 11px 36px; font-size:14px; font-family:'IBM Plex Sans',sans-serif;
+  }
+  .search-box input:focus{border-color:var(--amber);}
+  .search-box::before{
+    content:"⌕"; position:absolute; left:12px; top:50%; transform:translateY(-50%);
+    color:var(--text-faint); font-size:16px;
+  }
+  select.season-select{
+    background:var(--panel); color:var(--text); border:1px solid var(--hairline); border-radius:8px;
+    padding:10px 12px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; cursor:pointer;
+  }
+  .chip-row{display:flex; flex-wrap:wrap; gap:7px; margin-top:12px;}
+  .chip{
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px; padding:5px 11px; border-radius:100px;
+    border:1px solid var(--hairline); background:var(--panel); color:var(--text-dim); cursor:pointer;
+    transition:all .12s ease;
+  }
+  .chip:hover{border-color:var(--text-faint); color:var(--text);}
+  .chip.active{background:var(--amber); border-color:var(--amber); color:#0A0E13; font-weight:600;}
+
+  .results-count{margin-top:16px; font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--text-faint); letter-spacing:.03em; text-transform:uppercase;}
+
+  /* CARDS GRID */
+  .grid{margin-top:12px; display:grid; grid-template-columns:1fr; gap:8px;}
+  .doc-card{
+    display:flex; gap:14px; align-items:flex-start;
+    border:1px solid var(--hairline); background:var(--panel); border-radius:8px;
+    padding:13px 16px 13px 14px; border-left:3px solid var(--c);
+    text-decoration:none; color:var(--text);
+    transition:background .12s ease, border-color .12s ease;
+  }
+  .doc-card:hover{background:var(--panel-2); border-color:var(--hairline);}
+  .doc-card .body{flex:1; min-width:0;}
+  .doc-card .top-line{display:flex; flex-wrap:wrap; gap:8px; align-items:baseline; justify-content:space-between;}
+  .doc-card .title{font-size:14.5px; font-weight:600; line-height:1.35;}
+  .doc-card .title mark{background:rgba(242,180,65,.35); color:inherit; border-radius:2px;}
+  .doc-card .meta{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-faint); white-space:nowrap;
+  }
+  .doc-card .meta .c{color:var(--c);}
+  .doc-card .tags{display:flex; flex-wrap:wrap; gap:5px; margin-top:8px;}
+  .doc-card .tag{
+    font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-dim);
+    background:var(--bg-2); border:1px solid var(--hairline); border-radius:4px; padding:2px 6px;
+  }
+  .doc-card .arrow{color:var(--text-faint); font-size:16px; padding-top:2px;}
+  .doc-card:hover .arrow{color:var(--amber);}
+
+  /* DATASHEET CARDS */
+  .ds-card{
+    border:1px solid var(--hairline); background:var(--panel); border-radius:8px;
+    padding:16px 18px; border-left:3px solid var(--elec);
+  }
+  .ds-card .ds-head{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;}
+  .ds-card .ds-name{font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:15px;}
+  .ds-card .ds-type{
+    font-family:'IBM Plex Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--elec); border:1px solid var(--elec); border-radius:100px; padding:3px 9px;
+  }
+  .ds-card .ds-maker{color:var(--text-faint); font-size:11.5px; font-family:'IBM Plex Mono',monospace; margin-top:2px;}
+  .ds-card p{font-size:13.5px; color:var(--text-dim); line-height:1.5; margin:10px 0 8px;}
+  .ds-card .ds-use{font-size:12.5px; color:var(--text); background:var(--bg-2); border-left:2px solid var(--elec); padding:7px 10px; border-radius:4px; margin:8px 0;}
+  .ds-card .tags{display:flex; flex-wrap:wrap; gap:5px; margin-top:8px;}
+  .ds-card .tag{font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-dim); background:var(--bg-2); border:1px solid var(--hairline); border-radius:4px; padding:2px 6px;}
+  .ds-card .ds-links{display:flex; gap:10px; margin-top:12px;}
+  .ds-card .ds-links a{font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--amber); text-decoration:none; border:1px solid var(--hairline); border-radius:6px; padding:6px 10px;}
+  .ds-card .ds-links a:hover{border-color:var(--amber);}
+  .ds-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:12px;}
+  @media (max-width:800px){.ds-grid{grid-template-columns:1fr;}}
+
+  .empty-state{
+    text-align:center; padding:60px 20px; color:var(--text-faint);
+    font-family:'IBM Plex Mono',monospace; font-size:13px;
+  }
+
+  footer{
+    margin-top:40px; padding-top:18px; border-top:1px solid var(--hairline);
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-faint);
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div id="statusBanner" style="display:none;margin-bottom:14px;padding:10px 14px;border:1px solid #E14B3D;background:rgba(225,75,61,0.08);border-radius:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#E7EDF3;"></div>
+  <header class="console">
+    <div>
+      <p class="brand-eyebrow">Equipo Solaris · Aerotech</p>
+      <h1 class="brand-title">ARCHIVO TÉCNICO // CONSOLE</h1>
+      <p class="brand-sub">Buscador unificado de informes, memorias, manuales y datasheets del equipo. Todo lo que hoy vive repartido en tablas de Notion, en un único sitio para encontrarlo en segundos.</p>
+    </div>
+    <div class="console-meta" id="headerStats"></div>
+  </header>
+
+  <div class="telemetry">
+    <div class="telemetry-head">
+      <h2>Actividad de subida · documentos internos por mes</h2>
+      <span id="telemetryRange"></span>
+    </div>
+    <svg class="chart" id="telemetryChart" viewBox="0 0 1000 130" preserveAspectRatio="none"></svg>
+  </div>
+
+  <div class="stats" id="statCards"></div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="docs">Documentos internos</button>
+    <button class="tab-btn" data-tab="datasheets">Datasheets Electrónica</button>
+  </div>
+
+  <!-- DOCS TAB -->
+  <div id="tab-docs">
+    <div class="controls">
+      <div class="search-box">
+        <input id="searchInput" type="text" placeholder="Buscar por título, etiqueta, tipo o subsistema… (ej. 'aerofrenos', 'EuRoC', 'PCB')" autocomplete="off">
+      </div>
+      <select class="season-select" id="seasonSelect">
+        <option value="">Todas las temporadas</option>
+        <option value="2025/26">2025/26</option>
+        <option value="2024/25">2024/25</option>
+      </select>
+      <select class="season-select" id="typeSelect">
+        <option value="">Todos los tipos</option>
+      </select>
+    </div>
+    <div class="chip-row" id="tagChips"></div>
+    <div class="results-count" id="resultsCount"></div>
+    <div class="grid" id="docsGrid"></div>
+  </div>
+
+  <!-- DATASHEETS TAB -->
+  <div id="tab-datasheets" style="display:none;">
+    <div class="controls">
+      <div class="search-box">
+        <input id="dsSearchInput" type="text" placeholder="Buscar por componente, fabricante, tipo o interfaz… (ej. 'IMU', 'SPI', 'u-blox')" autocomplete="off">
+      </div>
+    </div>
+    <div class="results-count" id="dsResultsCount"></div>
+    <div class="ds-grid" id="dsGrid"></div>
+  </div>
+
+  <footer>
+    <span>Datos: espejo estático de las bases "Documentos internos" y "Datasheets Electrónica" de Notion · Solaris.</span>
+    <span>Generado como herramienta de consulta — para editar o subir documentos nuevos, hazlo en Notion.</span>
+  </footer>
+
+</div>
+
+
+<script>
+const state = { docs: [], datasheets: [], meta: null };
+
+async function loadData(){
+  try{
+    const [docsRes, dsRes, metaRes] = await Promise.all([
+      fetch('data/docs.json'),
+      fetch('data/datasheets.json'),
+      fetch('data/meta.json').catch(()=>null),
+    ]);
+    if(!docsRes.ok || !dsRes.ok) throw new Error('HTTP ' + docsRes.status + '/' + dsRes.status);
+    state.docs = await docsRes.json();
+    state.datasheets = await dsRes.json();
+    state.meta = (metaRes && metaRes.ok) ? await metaRes.json() : null;
+    boot();
+  }catch(err){
+    const banner = document.getElementById('statusBanner');
+    banner.style.display = 'block';
+    banner.innerHTML = 'No se han podido cargar los datos (' + err.message + '). ' +
+      'Si has abierto este archivo con doble clic, el navegador bloquea las peticiones fetch() a archivos locales. ' +
+      'Sirve la carpeta con <code>python3 -m http.server</code> o publícala en GitHub Pages — ver README.md.';
+  }
+}
+
+const SUBSYSTEMS = {
+  "prop":   {"label": "Propulsión",               "color": "#E14B3D"},
+  "struct": {"label": "Estructuras & Aerodinámica","color": "#4C8DD9"},
+  "dyn":    {"label": "Dinámica & Control",        "color": "#9B6BE0"},
+  "elec":   {"label": "Electrónica",               "color": "#38B27A"},
+  "coord":  {"label": "Coordinación Técnica",      "color": "#8C97A3"},
+  "general":{"label": "Solaris (general)",         "color": "#F2B441"},
+};
+
+function boot(){
+  const DOCS = state.docs;
+  const DATASHEETS = state.datasheets;
+
+  // ---------- Header stats ----------
+  const headerStatsEl = document.getElementById('headerStats');
+  const seasons = [...new Set(DOCS.map(d=>d.season))].sort();
+  const syncLabel = state.meta && state.meta.updatedAt
+    ? new Date(state.meta.updatedAt).toLocaleString('es-ES', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+    : '—';
+  headerStatsEl.innerHTML = `
+    <div class="m"><div class="n">${DOCS.length}</div><div class="l">Documentos</div></div>
+    <div class="m"><div class="n">${DATASHEETS.length}</div><div class="l">Datasheets</div></div>
+    <div class="m"><div class="n">${seasons.length}</div><div class="l">Temporadas</div></div>
+    <div class="m"><div class="n" style="font-size:14px">${syncLabel}</div><div class="l">Última sync</div></div>
+  `;
+
+  // ---------- Telemetry chart ----------
+  function monthKey(dateStr){ return (dateStr||'').slice(0,7); }
+  function monthLabel(key){
+    const [y,m] = key.split('-');
+    const names = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    return names[parseInt(m,10)-1] + " " + y.slice(2);
+  }
+  const counts = {};
+  DOCS.forEach(d=>{ const k = monthKey(d.date); if(k) counts[k] = (counts[k]||0)+1; });
+  const monthKeys = Object.keys(counts).sort();
+  document.getElementById('telemetryRange').textContent =
+    monthKeys.length ? (monthLabel(monthKeys[0]) + " \u2192 " + monthLabel(monthKeys[monthKeys.length-1])) : "";
+
+  (function drawChart(){
+    const svg = document.getElementById('telemetryChart');
+    const W = 1000, H = 130, padL = 8, padR = 8, padT = 14, padB = 20;
+    const n = monthKeys.length;
+    if(n === 0) return;
+    const maxV = Math.max(...monthKeys.map(k=>counts[k]));
+    const x = i => padL + (i/(Math.max(n-1,1))) * (W-padL-padR);
+    const y = v => H - padB - (v/maxV) * (H-padT-padB);
+
+    let path = "M " + x(0) + " " + y(counts[monthKeys[0]]);
+    for(let i=1;i<n;i++){ path += " L " + x(i) + " " + y(counts[monthKeys[i]]); }
+    let area = path + ` L ${x(n-1)} ${H-padB} L ${x(0)} ${H-padB} Z`;
+
+    let gridLines = "";
+    for(let gy=0; gy<=2; gy++){
+      const yy = padT + gy*((H-padT-padB)/2);
+      gridLines += `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" stroke="var(--grid)" stroke-width="1" />`;
+    }
+
+    let labels = "";
+    const step = Math.max(1, Math.round(n/8));
+    for(let i=0;i<n;i+=step){
+      labels += `<text class="chart-axis-label" x="${x(i)}" y="${H-4}" text-anchor="middle">${monthLabel(monthKeys[i])}</text>`;
+    }
+
+    let dots = "";
+    for(let i=0;i<n;i++){
+      dots += `<circle class="chart-dot" cx="${x(i)}" cy="${y(counts[monthKeys[i]])}" r="2.6"><title>${monthLabel(monthKeys[i])}: ${counts[monthKeys[i]]} documentos</title></circle>`;
+    }
+
+    svg.innerHTML = `
+      <defs>
+        <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#F2B441" stop-opacity="0.35" />
+          <stop offset="100%" stop-color="#F2B441" stop-opacity="0" />
+        </linearGradient>
+      </defs>
+      ${gridLines}
+      <path d="${area}" fill="url(#areaFill)" stroke="none" />
+      <path d="${path}" fill="none" stroke="#F2B441" stroke-width="2" />
+      ${dots}
+      ${labels}
+    `;
+  })();
+
+  // ---------- Stat cards (subsystem filter) ----------
+  let activeSubsystem = null;
+  const statCardsEl = document.getElementById('statCards');
+  function renderStatCards(){
+    statCardsEl.innerHTML = Object.entries(SUBSYSTEMS).map(([key,info])=>{
+      const count = DOCS.filter(d=>d.subsystem===key).length;
+      const active = activeSubsystem===key ? 'active' : '';
+      return `<div class="stat-card ${active}" style="--c:${info.color}" data-sub="${key}">
+        <div class="num">${count}</div>
+        <div class="lbl">${info.label}</div>
+      </div>`;
+    }).join('');
+    statCardsEl.querySelectorAll('.stat-card').forEach(card=>{
+      card.addEventListener('click', ()=>{
+        const sub = card.dataset.sub;
+        activeSubsystem = (activeSubsystem === sub) ? null : sub;
+        renderStatCards();
+        renderDocs();
+      });
+    });
+  }
+  renderStatCards();
+
+  // ---------- Type select ----------
+  const typeSelect = document.getElementById('typeSelect');
+  const types = [...new Set(DOCS.map(d=>d.tipo))].sort();
+  typeSelect.innerHTML += types.map(t=>`<option value="${t}">${t}</option>`).join('');
+
+  // ---------- Tag chips (top tags) ----------
+  const tagFreq = {};
+  DOCS.forEach(d=>(d.tags||[]).forEach(t=>{ tagFreq[t]=(tagFreq[t]||0)+1; }));
+  const topTags = Object.entries(tagFreq).sort((a,b)=>b[1]-a[1]).slice(0,16).map(e=>e[0]);
+  let activeTag = null;
+  const tagChipsEl = document.getElementById('tagChips');
+  function renderTagChips(){
+    tagChipsEl.innerHTML = topTags.map(t=>{
+      const active = activeTag===t ? 'active' : '';
+      return `<button class="chip ${active}" data-tag="${t}">${t} <span style="opacity:.6">(${tagFreq[t]})</span></button>`;
+    }).join('');
+    tagChipsEl.querySelectorAll('.chip').forEach(chip=>{
+      chip.addEventListener('click', ()=>{
+        const t = chip.dataset.tag;
+        activeTag = (activeTag === t) ? null : t;
+        renderTagChips();
+        renderDocs();
+      });
+    });
+  }
+  renderTagChips();
+
+  // ---------- Docs search + render ----------
+  const searchInput = document.getElementById('searchInput');
+  const seasonSelect = document.getElementById('seasonSelect');
+  const docsGrid = document.getElementById('docsGrid');
+  const resultsCount = document.getElementById('resultsCount');
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function highlight(text, q){
+    text = String(text);
+    if(!q) return escapeHtml(text);
+    const idx = text.toLowerCase().indexOf(q.toLowerCase());
+    if(idx === -1) return escapeHtml(text);
+    return escapeHtml(text.slice(0,idx)) + '<mark>' + escapeHtml(text.slice(idx,idx+q.length)) + '</mark>' + escapeHtml(text.slice(idx+q.length));
+  }
+
+  function renderDocs(){
+    const q = searchInput.value.trim().toLowerCase();
+    const season = seasonSelect.value;
+    const type = typeSelect.value;
+
+    let results = DOCS.filter(d=>{
+      if(activeSubsystem && d.subsystem !== activeSubsystem) return false;
+      if(season && d.season !== season) return false;
+      if(type && d.tipo !== type) return false;
+      if(activeTag && !(d.tags||[]).includes(activeTag)) return false;
+      if(q){
+        const hay = (d.title + ' ' + d.tipo + ' ' + d.season + ' ' + (SUBSYSTEMS[d.subsystem]||{}).label + ' ' + (d.tags||[]).join(' ')).toLowerCase();
+        if(!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    results.sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+
+    resultsCount.textContent = results.length + (results.length===1 ? ' documento encontrado' : ' documentos encontrados');
+
+    if(results.length === 0){
+      docsGrid.innerHTML = `<div class="empty-state">Sin resultados para estos filtros. Prueba con otra etiqueta o borra la búsqueda.</div>`;
+      return;
+    }
+
+    docsGrid.innerHTML = results.map(d=>{
+      const info = SUBSYSTEMS[d.subsystem] || {label:d.subsystem, color:'#8C97A3'};
+      const tags = d.tags||[];
+      const tagsHtml = tags.slice(0,7).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join('');
+      const more = tags.length > 7 ? `<span class="tag">+${tags.length-7}</span>` : '';
+      return `<a class="doc-card" style="--c:${info.color}" href="${d.url}" target="_blank" rel="noopener">
+        <div class="body">
+          <div class="top-line">
+            <div class="title">${highlight(d.title, q)}</div>
+            <div class="meta"><span class="c">${info.label}</span> \u00b7 ${escapeHtml(d.tipo)} \u00b7 ${escapeHtml(d.season)} \u00b7 ${d.date||''}</div>
+          </div>
+          <div class="tags">${tagsHtml}${more}</div>
+        </div>
+        <div class="arrow">\u2197</div>
+      </a>`;
+    }).join('');
+  }
+
+  searchInput.addEventListener('input', renderDocs);
+  seasonSelect.addEventListener('change', renderDocs);
+  typeSelect.addEventListener('change', renderDocs);
+  renderDocs();
+
+  // ---------- Datasheets ----------
+  const dsSearchInput = document.getElementById('dsSearchInput');
+  const dsGrid = document.getElementById('dsGrid');
+  const dsResultsCount = document.getElementById('dsResultsCount');
+
+  function renderDatasheets(){
+    const q = dsSearchInput.value.trim().toLowerCase();
+    let results = DATASHEETS.filter(ds=>{
+      if(!q) return true;
+      const hay = (ds.name+' '+ds.tipo+' '+ds.fabricante+' '+ds.desc+' '+ds.uso+' '+(ds.proyectos||[]).join(' ')+' '+(ds.interfaces||[]).join(' ')).toLowerCase();
+      return hay.includes(q);
+    });
+    dsResultsCount.textContent = results.length + (results.length===1 ? ' componente encontrado' : ' componentes encontrados');
+
+    if(results.length === 0){
+      dsGrid.innerHTML = `<div class="empty-state">Sin resultados. Prueba con el fabricante o el tipo de interfaz.</div>`;
+      return;
+    }
+
+    dsGrid.innerHTML = results.map(ds=>{
+      const interfaces = (ds.interfaces||[]).map(i=>`<span class="tag">${escapeHtml(i)}</span>`).join('');
+      const proyectos = (ds.proyectos||[]).map(p=>`<span class="tag">${escapeHtml(p)}</span>`).join('');
+      return `<div class="ds-card">
+        <div class="ds-head">
+          <div>
+            <div class="ds-name">${highlight(ds.name, q)}</div>
+            <div class="ds-maker">${escapeHtml(ds.fabricante)}</div>
+          </div>
+          <span class="ds-type">${escapeHtml(ds.tipo)}</span>
+        </div>
+        <p>${escapeHtml(ds.desc)}</p>
+        <div class="ds-use">${escapeHtml(ds.uso)}</div>
+        <div class="tags">${interfaces}${proyectos}</div>
+        <div class="ds-links">
+          ${ds.enlace ? `<a href="${ds.enlace}" target="_blank" rel="noopener">Datasheet \u2197</a>` : ''}
+          <a href="${ds.url}" target="_blank" rel="noopener">Ver en Notion \u2197</a>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  dsSearchInput.addEventListener('input', renderDatasheets);
+  renderDatasheets();
+
+  // ---------- Tabs ----------
+  document.querySelectorAll('.tab-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      const tab = btn.dataset.tab;
+      document.getElementById('tab-docs').style.display = tab==='docs' ? 'block' : 'none';
+      document.getElementById('tab-datasheets').style.display = tab==='datasheets' ? 'block' : 'none';
+    });
+  });
+}
+
+loadData();
+</script>
+
+</body>
+</html>
