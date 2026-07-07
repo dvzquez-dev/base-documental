@@ -109,18 +109,23 @@ async function main() {
   const docs = docPages.map(buildDoc).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const datasheets = dsPages.map(buildDatasheet).sort((a, b) => a.name.localeCompare(b.name));
 
+  const meta = {
+    updatedAt: new Date().toISOString(),
+    docsCount: docs.length,
+    datasheetsCount: datasheets.length,
+    source: "notion-sync",
+  };
+
   const fs = await import("node:fs/promises");
   await fs.mkdir(new URL("../data/", import.meta.url), { recursive: true });
   await fs.writeFile(new URL("../data/docs.json", import.meta.url), JSON.stringify(docs));
   await fs.writeFile(new URL("../data/datasheets.json", import.meta.url), JSON.stringify(datasheets));
+  await fs.writeFile(new URL("../data/meta.json", import.meta.url), JSON.stringify(meta));
+  // Archivo combinado: pensado para automatizaciones externas (Zapier, Make,
+  // n8n...) que solo quieren hacer UNA petición HTTP en vez de tres.
   await fs.writeFile(
-    new URL("../data/meta.json", import.meta.url),
-    JSON.stringify({
-      updatedAt: new Date().toISOString(),
-      docsCount: docs.length,
-      datasheetsCount: datasheets.length,
-      source: "notion-sync",
-    })
+    new URL("../data/all.json", import.meta.url),
+    JSON.stringify({ meta, docs, datasheets })
   );
 
   console.log(`OK: ${docs.length} documentos, ${datasheets.length} datasheets.`);
