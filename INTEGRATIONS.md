@@ -60,16 +60,20 @@ se combinan:
 1. **Localizar** el documento que buscas en `data/all.json` (o
    `docs.json`/`datasheets.json`). Es barato porque son ~40 KB sin ruido de
    esquema, y cada entrada trae un campo `url` con el link directo a la
-   página de Notion.
+   página de Notion — y un campo `docCode` (p.ej. `"Informe_S-2009_26"`)
+   que identifica el documento sin ambigüedad. Ni `title` ni `id` sirven
+   para eso por sí solos: el título se repite entre temporadas ("Informe
+   mayo electrónica" existe una vez por curso) y el `id` numérico se
+   reutiliza de una temporada a otra. `docCode` no se repite nunca.
 2. **Leer el contenido real** solo de esa página concreta, con una única
    llamada a Notion usando ese `url` (no una búsqueda por todo el
    workspace). El índice no tiene el cuerpo del documento — solo metadata
-   (título, tipo, etiquetas, fecha) — así que este segundo paso es
+   (título, código, tipo, etiquetas, fecha) — así que este segundo paso es
    imprescindible en cuanto necesitas algo más que "en qué documento está
    esto".
 
 Ejemplo real (probado): a partir de la entrada
-`{"title":"Informe mayo electrónica", ..., "url":"https://app.notion.com/p/Informe-mayo-electr-nica-395b0e3a469c81baa4bffffa560a97f1"}`
+`{"docCode":"Informe_S-2009_26","title":"Informe mayo electrónica", ..., "url":"https://app.notion.com/p/Informe-mayo-electr-nica-395b0e3a469c81baa4bffffa560a97f1"}`
 del índice, una sola llamada a ese `url` en Notion devuelve el resumen
 completo del informe, quién lo subió, los enlaces al DOCX/PDF en Drive y las
 etiquetas finales — nada de eso está en el índice, y no hizo falta buscar
