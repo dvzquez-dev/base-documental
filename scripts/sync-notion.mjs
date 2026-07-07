@@ -58,6 +58,13 @@ const getSelect = (prop) => prop?.select?.name ?? null;
 const getMultiSelect = (prop) => (prop?.multi_select ?? []).map((o) => o.name);
 const getNumber = (prop) => (typeof prop?.number === "number" ? prop.number : null);
 const getUrlProp = (prop) => prop?.url ?? null;
+// Las propiedades de tipo "formula" en Notion devuelven su resultado ya
+// calculado (string, number, boolean o date, según cómo esté definida la
+// fórmula). Aquí solo nos interesa el caso de resultado en texto.
+const getFormulaString = (prop) => {
+  if (!prop || prop.type !== "formula" || !prop.formula) return null;
+  return prop.formula.type === "string" ? (prop.formula.string ?? null) : null;
+};
 
 // Mapea el texto de "Subsistema o Unidad" al código corto + color usado en el front-end.
 const SUBSYSTEM_MAP = {
@@ -74,6 +81,11 @@ function buildDoc(page) {
   const subsystemLabel = getSelect(props["Subsistema o Unidad"]);
   return {
     id: getNumber(props["ID (XXXX)"]),
+    // Código documental único (p.ej. "Informe_S-2009_26"), calculado por
+    // Notion a partir de tipo + ID + temporada. A diferencia de "id" (que
+    // se reutiliza entre temporadas), este código no se repite nunca: es el
+    // identificador sin ambigüedad para localizar un documento exacto.
+    docCode: getFormulaString(props["Nombre en Drive de Aerotech"]),
     subsystem: SUBSYSTEM_MAP[subsystemLabel] ?? "general",
     title: getTitle(props["Título"]) || "(sin título)",
     tipo: getSelect(props["Tipo Aerotech"]) || "SinTipo",
