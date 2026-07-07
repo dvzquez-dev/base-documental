@@ -6,20 +6,60 @@ estés integrando.
 
 ## 1. Conmigo (Claude), en el chat
 
-Ya tengo acceso directo a las dos bases de Notion (Documentos internos y
-Datasheets Electrónica) como herramienta conectada en esta conversación. Eso
-significa que para preguntas de contenido ("¿qué informes hay de propulsión
-en abril?", "dame el enlace de la datasheet del BMP390") no necesito pasar
-por GitHub en absoluto — consulto Notion en el momento, sin caché ni retraso
-de sincronización.
+**Importante — que quede sin ambigüedad:** nada de lo publicado en este repo
+(`data/all.json`, `llms.txt`, ni ningún otro archivo) cambia esto. Es una
+regla fija de la herramienta de navegación de Claude, no algo que dependa de
+cómo esté montado este proyecto:
 
-Lo que **no puedo hacer** es visitar por mi cuenta una URL que no me hayas
-pasado tú en el propio mensaje. Es una barrera de seguridad deliberada (para
-que no pueda inventarme ni recordar URLs entre conversaciones). Así que si
-alguna vez quieres que compruebe específicamente lo que está publicado en la
-web (no en Notion), tendrás que pegarme el enlace exacto en ese momento,
-cada vez. No hay forma de evitarlo, y no es algo que dependa de cómo esté
-montado este proyecto.
+> Claude solo puede leer una URL si aparece escrita en el propio mensaje de
+> esa conversación — porque la pegó la persona, o porque salió de una
+> búsqueda hecha en esa misma conversación. Claude nunca visita una URL por
+> iniciativa propia, ni la recuerda de una conversación anterior, aunque sea
+> pública y esté documentada en un `llms.txt`.
+
+Así que para que Claude compruebe algo de lo publicado en la web (no de
+Notion), siempre hay que pegarle el enlace o el contenido en el mensaje, en
+esa conversación, cada vez. No hay forma de evitar este paso.
+
+Lo que sí tengo disponible de forma permanente, sin pegar nada, es una
+herramienta conectada directamente a las dos bases de Notion (Documentos
+internos y Datasheets Electrónica). Para preguntas de contenido ("¿qué
+informes hay de propulsión en abril?") puedo consultarlas en el momento, sin
+pasar por GitHub ni por la sincronización de 10 minutos.
+
+### ¿Es más barato leer el JSON publicado que consultar Notion en directo?
+
+Para casos concretos, sí, bastante:
+
+- `data/meta.json` pesa ~100 bytes (un contador y una fecha) — leerlo es
+  casi gratis.
+- Consultar Notion en frío requiere primero traer el esquema de la base: solo
+  eso, con los colores e IDs de las ~190 etiquetas de "Documentos internos",
+  son más de 30.000 caracteres antes de ver un solo documento real.
+- `data/all.json` (documentos + datasheets) pesa ~43 KB, pero sin ese ruido
+  de esquema — comparable o más barato que una consulta a Notion ya afinada.
+
+Criterio práctico:
+- **JSON publicado** → para contar documentos, comprobar cuándo fue la
+  última sincronización, o buscar por título/etiqueta/subsistema. Es la
+  opción barata y suficiente el 90% de las veces.
+- **Notion en directo** → cuando hace falta el dato más fresco posible (algo
+  subido hace 2 minutos, antes del próximo sync) o contenido que el índice
+  no tiene (el cuerpo de un informe, no solo su título y etiquetas).
+
+Nota: leer el JSON publicado solo es "gratis sin pegar nada" dentro de la
+misma conversación, una vez que esa URL ya ha aparecido ahí (porque la
+pegaste tú, o porque Claude ya la leyó antes en ese mismo chat). En una
+conversación nueva, hay que volver a pasar el enlace una vez.
+
+## 2. Otros agentes de IA y automatizaciones sin IA
+
+Aquí es donde sí se nota la diferencia de tener `data/all.json` y
+`llms.txt` publicados: un agente de IA con navegación web más autónoma que
+la de Claude en este producto (o una automatización sin IA de por medio,
+como Zapier o n8n) puede descubrir y leer estos archivos sin que nadie le
+pegue el link a mano cada vez. Esa es la utilidad real de estos dos
+archivos — no aplica a Claude en este chat.
 
 ## 2. Automatizaciones sin IA (Zapier, Make, n8n, cron propio, Google Sheets...)
 
