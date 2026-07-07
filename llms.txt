@@ -14,16 +14,29 @@
 
 ## Esquema — docs.json (array de objetos)
 
-- `id` (number | null): identificador interno; puede repetirse entre temporadas.
+- `id` (number | null): identificador interno. **No es único**: se reutiliza
+  el mismo número entre temporadas distintas (p.ej. `id: 2009` existe tanto
+  en la temporada 2024/25 como en la 2025/26, son documentos distintos).
+- `docCode` (string | null): **código documental único**, p.ej.
+  `"Informe_S-2009_26"`. Este es el identificador que hay que usar para
+  referirse a un documento concreto sin ambigüedad — no se repite nunca,
+  a diferencia de `id` o de `title` (que sí pueden coincidir entre
+  temporadas o subsistemas). Puede venir `null` en documentos antiguos o
+  atípicos donde Notion no calculó el código.
 - `subsystem` (string): uno de `prop` (Propulsión), `struct`
   (Estructuras&Aerodinámica), `dyn` (Dinámica&Control), `elec` (Electrónica),
   `coord` (Coordinación Técnica), `general` (Solaris).
-- `title` (string): título del documento.
+- `title` (string): título del documento. Puede repetirse entre temporadas
+  (p.ej. "Informe mayo electrónica" existe una vez por curso) — para
+  distinguirlos sin ambigüedad, usa `docCode`, no `title`.
 - `tipo` (string): p.ej. "Informe", "Manual", "Tabla", "Memoria", "Carpeta", "txt".
 - `season` (string): "2024/25" o "2025/26".
 - `tags` (string[]): etiquetas libres tal como están en Notion.
 - `date` (string, YYYY-MM-DD): fecha de subida.
-- `url` (string): enlace a la página original en Notion.
+- `url` (string): enlace a la página original en Notion. Recomendado:
+  localizar el documento por `docCode` en el índice y luego usar este `url`
+  para leer su contenido completo (el índice solo trae metadata, no el
+  cuerpo del documento).
 
 ## Esquema — datasheets.json (array de objetos)
 
