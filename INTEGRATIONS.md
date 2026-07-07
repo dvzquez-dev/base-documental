@@ -52,6 +52,35 @@ misma conversación, una vez que esa URL ya ha aparecido ahí (porque la
 pegaste tú, o porque Claude ya la leyó antes en ese mismo chat). En una
 conversación nueva, hay que volver a pasar el enlace una vez.
 
+### El patrón bueno para una pipeline documental: índice barato + fetch preciso
+
+Ni el JSON publicado ni Notion en directo son "la" solución por sí solos —
+se combinan:
+
+1. **Localizar** el documento que buscas en `data/all.json` (o
+   `docs.json`/`datasheets.json`). Es barato porque son ~40 KB sin ruido de
+   esquema, y cada entrada trae un campo `url` con el link directo a la
+   página de Notion.
+2. **Leer el contenido real** solo de esa página concreta, con una única
+   llamada a Notion usando ese `url` (no una búsqueda por todo el
+   workspace). El índice no tiene el cuerpo del documento — solo metadata
+   (título, tipo, etiquetas, fecha) — así que este segundo paso es
+   imprescindible en cuanto necesitas algo más que "en qué documento está
+   esto".
+
+Ejemplo real (probado): a partir de la entrada
+`{"title":"Informe mayo electrónica", ..., "url":"https://app.notion.com/p/Informe-mayo-electr-nica-395b0e3a469c81baa4bffffa560a97f1"}`
+del índice, una sola llamada a ese `url` en Notion devuelve el resumen
+completo del informe, quién lo subió, los enlaces al DOCX/PDF en Drive y las
+etiquetas finales — nada de eso está en el índice, y no hizo falta buscar
+nada más en Notion para encontrarlo.
+
+Coste aproximado de cada paso, para referencia:
+- Paso 1 (índice): ~100 bytes (`meta.json`) a ~43 KB (`all.json`) — una vez.
+- Paso 2 (Notion): una página normal, sin el ruido de esquema de una
+  búsqueda en frío — solo por el documento ganador, no por todos los
+  candidatos.
+
 ## 2. Otros agentes de IA y automatizaciones sin IA
 
 Aquí es donde sí se nota la diferencia de tener `data/all.json` y
