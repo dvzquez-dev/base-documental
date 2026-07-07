@@ -1,0 +1,52 @@
+# Solaris Document Console — datos para agentes / IA
+
+> Índice de documentos internos y datasheets de electrónica del equipo de
+> cohetería universitaria Solaris (Aerotech). Datos públicos, de solo
+> lectura, sin autenticación. Se sincronizan desde Notion automáticamente
+> cada ~30 minutos.
+
+## Endpoints (JSON, GET simple, sin API key)
+
+- Todo en un solo archivo: https://dvzquez-dev.github.io/base-documental/data/all.json
+- Solo documentos internos: https://dvzquez-dev.github.io/base-documental/data/docs.json
+- Solo datasheets de electrónica: https://dvzquez-dev.github.io/base-documental/data/datasheets.json
+- Metadatos (hora de la última sincronización): https://dvzquez-dev.github.io/base-documental/data/meta.json
+
+## Esquema — docs.json (array de objetos)
+
+- `id` (number | null): identificador interno; puede repetirse entre temporadas.
+- `subsystem` (string): uno de `prop` (Propulsión), `struct`
+  (Estructuras&Aerodinámica), `dyn` (Dinámica&Control), `elec` (Electrónica),
+  `coord` (Coordinación Técnica), `general` (Solaris).
+- `title` (string): título del documento.
+- `tipo` (string): p.ej. "Informe", "Manual", "Tabla", "Memoria", "Carpeta", "txt".
+- `season` (string): "2024/25" o "2025/26".
+- `tags` (string[]): etiquetas libres tal como están en Notion.
+- `date` (string, YYYY-MM-DD): fecha de subida.
+- `url` (string): enlace a la página original en Notion.
+
+## Esquema — datasheets.json (array de objetos)
+
+- `name`, `tipo`, `fabricante`, `desc`, `uso` (string).
+- `proyectos` (string[]): proyectos donde se usa el componente.
+- `interfaces` (string[]): interfaces eléctricas (SPI, I²C, UART, etc.).
+- `enlace` (string): URL al PDF del datasheet del fabricante.
+- `url` (string): enlace a la página en Notion.
+
+## Esquema — meta.json
+
+- `updatedAt` (string, ISO datetime): última sincronización con Notion.
+- `docsCount`, `datasheetsCount` (number).
+- `source` (string).
+
+## Notas para agentes
+
+- No se necesita ninguna clave de Notion para leer estos archivos: son un
+  espejo público de solo lectura, no la fuente original.
+- Frescura de los datos: hasta ~30 minutos de desfase respecto a Notion.
+  Comprueba `meta.json` si necesitas saber exactamente cuándo se generaron.
+  No existe un endpoint público para forzar una sincronización inmediata.
+- Los enlaces en el campo `url` llevan a Notion y pueden requerir estar
+  autenticado en ese workspace para abrirse.
+- Estos archivos son de solo lectura: no hay ningún endpoint para escribir,
+  crear o modificar documentos desde aquí.
