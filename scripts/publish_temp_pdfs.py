@@ -231,14 +231,24 @@ def main():
                 changed = True
             # Tambien borramos la copia de staging en Drive (carpeta
             # STAGING_TEMP_PDF_SOLARIS): ya no hace falta, Notion tiene su
-            # propia copia interna del PDF.
+            # propia copia interna del PDF. Si esto falla, NO marcamos
+            # EXPIRADO: dejamos la fila en EMBEBIDO_CONFIRMADO para que el
+            # siguiente ciclo lo reintente, en vez de perder el aviso.
+            drive_deleted = False
             try:
                 drive.files().delete(fileId=row["drive_file_id"]).execute()
+                drive_deleted = True
                 print(f"Copia de staging en Drive borrada: {filename}")
             except Exception as exc:
-                print(f"Aviso: no se pudo borrar la copia de staging en Drive ({filename}): {exc}", file=sys.stderr)
-            write_row(sheets, row["row_number"], {"estado": "EXPIRADO"})
-            print(f"Retirado (embebido confirmado): {filename}")
+                print(f"Aviso: no se pudo borrar la copia de staging en Drive ({filename}), se reintentara en el proximo ciclo: {exc}", file=sys.stderr)
+ 
+            if drive_deleted:
+                write_row(sheets, row["row_number"], {"estado": "EXPIRADO"})
+                print(f"Retirado (embebido confirmado): {filename}")
+            else:
+                write_row(sheets, row["row_number"], {
+                    "notas": f"Pendiente de reintento: fallo al borrar copia de staging en Drive ({now_iso()}).",
+                })
  
         elif estado == "PUBLICADO":
             expira = parse_iso(row["fecha_expira"])
