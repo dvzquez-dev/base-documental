@@ -1,0 +1,26 @@
+name: Chequeo rápido de estado del pipeline Solaris
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # suelo practico fiable de GitHub Actions; el cron externo (cron-job.org) puede disparar workflow_dispatch cada 2 min para mas frecuencia
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  check-status:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install google-api-python-client google-auth
+
+      - name: Calcular y publicar pipeline_status.json
+        env:
+          GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+        run: python scripts/check_pipeline_status.py
