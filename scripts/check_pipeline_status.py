@@ -77,21 +77,28 @@ def parse_iso(value):
         return None
 
 
+class SheetReadError(Exception):
+    """Fallo real de lectura (red, permisos, API) — distinto de 'la pestaña está
+    vacía'. Se usa para que las señales que dependan de esta lectura se traten
+    como 'desconocido' (forzar pasada completa), nunca como 'falso' silencioso."""
+
+
 def get_values(sheets, rng):
-    try:
-        resp = sheets.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=rng).execute()
-        return resp.get("values", [])
-    except Exception as exc:
-        print(f"Aviso: no se pudo leer el rango {rng}: {exc}", file=sys.stderr)
-        return None
+    resp = sheets.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=rng).execute()
+    return resp.get("values", [])
 
 
 def rows_as_dicts(sheets, sheet_name):
     """Lee la pestaña completa y la devuelve como lista de dicts usando la fila 1 como cabecera.
-    Busca los nombres de columna dinámicamente, no asume posiciones fijas."""
-    values = get_values(sheets, f"{sheet_name}!A1:ZZ")
+    Busca los nombres de columna dinámicamente, no asume posiciones fijas.
+    Lanza SheetReadError si la lectura falla de verdad (para no confundir un error
+    de API con 'la pestaña no tiene filas')."""
+    try:
+        values = get_values(sheets, f"{sheet_name}!A1:ZZ")
+    except Exception as exc:
+        raise SheetReadError(f"no se pudo leer {sheet_name}: {exc}") from exc
     if not values:
-        return None
+        return []  # pestaña genuinamente vacía (sin ni siquiera cabecera) — no es un error
     header = [h.strip() for h in values[0]]
     out = []
     for row in values[1:]:
@@ -101,14 +108,19 @@ def rows_as_dicts(sheets, sheet_name):
 
 
 def read_config(sheets):
+    # Deliberadamente NO se atrapa la excepción aquí: si no podemos leer CONFIG
+    # (checkpoint, EMERGENCY_STOP), no tenemos base fiable para decidir nada.
+    # Dejamos que main() falle y NO escriba pipeline_status.json — el archivo
+    # publicado anterior se queda tal cual, y el umbral de antigüedad
+    # (checkedAt) que revisa Cowork detectará que este chequeo lleva sin
+    # actualizarse y hará la pasada completa por precaución.
     rows = rows_as_dicts(sheets, "CONFIG")
     config = {}
-    if rows:
-        for row in rows:
-            key = row.get("key") or row.get("Key") or row.get("KEY")
-            value = row.get("value") or row.get("Value") or row.get("VALUE")
-            if key:
-                config[key] = value
+    for row in rows:
+        key = row.get("key") or row.get("Key") or row.get("KEY")
+        value = row.get("value") or row.get("Value") or row.get("VALUE")
+        if key:
+            config[key] = value
     return config
 
 
@@ -118,6 +130,7 @@ def main():
 
     señales = {}
     motivos = []
+    lecturas_fallidas = []
 
     config = read_config(sheets)
     emergency_stop = str(config.get("EMERGENCY_STOP", "")).strip().upper() == "TRUE"
@@ -128,6 +141,7 @@ def main():
         "checkedAt": now_iso(),
         "checkpointUsado": checkpoint_raw or None,
         "señales": señales,
+        "lecturas_fallidas": lecturas_fallidas,
         "debe_ejecutar_pasada_completa": True,
         "motivo": "",
     }
@@ -144,62 +158,82 @@ def main():
         write_and_push(result)
         return
 
+    # Regla general para las 4 señales "críticas" de abajo: si la lectura FALLA
+    # de verdad (no si la pestaña está simplemente vacía), no asumimos "no hay
+    # nada pendiente" — asumimos lo contrario (fuerza pasada completa) y lo
+    # registramos en lecturas_fallidas, para no convertir un error transitorio
+    # de la API de Sheets en un falso "todo tranquilo".
+
     # --- Señal 1: COLA_PUBLICACION_TEMPORAL_PDF ---
-    cola = rows_as_dicts(sheets, "COLA_PUBLICACION_TEMPORAL_PDF")
-    cola_pendiente = False
-    if cola is not None:
+    try:
+        cola = rows_as_dicts(sheets, "COLA_PUBLICACION_TEMPORAL_PDF")
         cola_pendiente = any(
             (row.get("estado") or "").strip() in ("PENDIENTE", "PUBLICADO", "EMBEBIDO_CONFIRMADO")
             for row in cola
         )
+    except SheetReadError as exc:
+        print(str(exc), file=sys.stderr)
+        lecturas_fallidas.append("COLA_PUBLICACION_TEMPORAL_PDF")
+        cola_pendiente = True
     señales["cola_publicacion_pdf_pendiente"] = cola_pendiente
     if cola_pendiente:
-        motivos.append("hay filas pendientes en COLA_PUBLICACION_TEMPORAL_PDF")
+        motivos.append("hay filas pendientes en COLA_PUBLICACION_TEMPORAL_PDF" if "COLA_PUBLICACION_TEMPORAL_PDF" not in lecturas_fallidas else "no se pudo leer COLA_PUBLICACION_TEMPORAL_PDF (se asume pendiente por seguridad)")
 
     # --- Señal 2: LOG_ENVIO_IA ---
-    log_ia = rows_as_dicts(sheets, "LOG_ENVIO_IA")
-    log_ia_pendiente = False
-    if log_ia is not None:
+    try:
+        log_ia = rows_as_dicts(sheets, "LOG_ENVIO_IA")
         log_ia_pendiente = any(
             (row.get("estado_conversacion") or "").strip() == "PENDIENTE_RESPUESTA"
             for row in log_ia
         )
+    except SheetReadError as exc:
+        print(str(exc), file=sys.stderr)
+        lecturas_fallidas.append("LOG_ENVIO_IA")
+        log_ia_pendiente = True
     señales["log_envio_ia_pendiente"] = log_ia_pendiente
     if log_ia_pendiente:
-        motivos.append("hay preguntas sin responder en LOG_ENVIO_IA")
+        motivos.append("hay preguntas sin responder en LOG_ENVIO_IA" if "LOG_ENVIO_IA" not in lecturas_fallidas else "no se pudo leer LOG_ENVIO_IA (se asume pendiente por seguridad)")
 
     # --- Señal 3: SEGUIMIENTO_ENVIOS ---
-    seguimiento = rows_as_dicts(sheets, "SEGUIMIENTO_ENVIOS")
-    seguimiento_pendiente = False
-    if seguimiento is not None:
+    try:
+        seguimiento = rows_as_dicts(sheets, "SEGUIMIENTO_ENVIOS")
         seguimiento_pendiente = any(
             (row.get("estado_final") or "").strip() in ("BORRADOR_PENDIENTE", "DISCREPANCIA")
             for row in seguimiento
         )
+    except SheetReadError as exc:
+        print(str(exc), file=sys.stderr)
+        lecturas_fallidas.append("SEGUIMIENTO_ENVIOS")
+        seguimiento_pendiente = True
     señales["seguimiento_envios_pendiente"] = seguimiento_pendiente
     if seguimiento_pendiente:
-        motivos.append("hay seguimiento de envíos pendiente en SEGUIMIENTO_ENVIOS")
+        motivos.append("hay seguimiento de envíos pendiente en SEGUIMIENTO_ENVIOS" if "SEGUIMIENTO_ENVIOS" not in lecturas_fallidas else "no se pudo leer SEGUIMIENTO_ENVIOS (se asume pendiente por seguridad)")
 
     # --- Señal 4: SOLICITUDES.updated_at ---
-    solicitudes_header = get_values(sheets, "SOLICITUDES!A1:ZZ1")
-    solicitudes_novedad = False
-    if solicitudes_header:
-        header = solicitudes_header[0]
-        if "updated_at" in header:
-            col_idx = header.index("updated_at")
-            col_letter = _col_letter(col_idx)
-            col_values = get_values(sheets, f"SOLICITUDES!{col_letter}2:{col_letter}")
-            if col_values:
-                max_dt = None
-                for row in col_values:
-                    dt = parse_iso(row[0]) if row else None
-                    if dt and (max_dt is None or dt > max_dt):
-                        max_dt = dt
-                if max_dt and max_dt > checkpoint_dt:
-                    solicitudes_novedad = True
+    try:
+        solicitudes_header = get_values(sheets, "SOLICITUDES!A1:ZZ1")
+        solicitudes_novedad = False
+        if solicitudes_header:
+            header = solicitudes_header[0]
+            if "updated_at" in header:
+                col_idx = header.index("updated_at")
+                col_letter = _col_letter(col_idx)
+                col_values = get_values(sheets, f"SOLICITUDES!{col_letter}2:{col_letter}")
+                if col_values:
+                    max_dt = None
+                    for row in col_values:
+                        dt = parse_iso(row[0]) if row else None
+                        if dt and (max_dt is None or dt > max_dt):
+                            max_dt = dt
+                    if max_dt and max_dt > checkpoint_dt:
+                        solicitudes_novedad = True
+    except Exception as exc:
+        print(f"no se pudo leer SOLICITUDES.updated_at: {exc}", file=sys.stderr)
+        lecturas_fallidas.append("SOLICITUDES")
+        solicitudes_novedad = True
     señales["solicitudes_updated_at_novedad"] = solicitudes_novedad
     if solicitudes_novedad:
-        motivos.append("SOLICITUDES tiene expedientes con updated_at más reciente que el checkpoint")
+        motivos.append("SOLICITUDES tiene expedientes con updated_at más reciente que el checkpoint" if "SOLICITUDES" not in lecturas_fallidas else "no se pudo leer SOLICITUDES.updated_at (se asume pendiente por seguridad)")
 
     # --- Señal 5: formulario de ingesta (best-effort, puede no tener acceso) ---
     form_novedad = False
