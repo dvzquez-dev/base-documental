@@ -1,1548 +1,572 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="color-scheme" content="dark" />
-  <title>Solaris · Archivo Técnico Unificado</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <style>
-:root {
-  --bg: #080b12;
-  --bg-soft: #101624;
-  --panel: rgba(13, 18, 30, 0.88);
-  --panel-strong: rgba(17, 25, 42, 0.96);
-  --stroke: rgba(222, 232, 255, 0.13);
-  --stroke-strong: rgba(255, 184, 77, 0.38);
-  --text: #eef3ff;
-  --muted: #9ba9c2;
-  --muted-2: #75829a;
-  --accent: #ffb84d;
-  --accent-2: #ff7a45;
-  --accent-soft: rgba(255, 184, 77, 0.14);
-  --cyan: #7ddcff;
-  --ok: #7cf2b0;
-  --danger: #ff6f8f;
-  --shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
-  --radius-xl: 28px;
-  --radius-lg: 20px;
-  --radius-md: 14px;
-  --mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --display: "Chakra Petch", "Space Grotesk", system-ui, sans-serif;
-  --sans: "Space Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>Solaris · Archivo Técnico</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#0B0B0F;
+  --void-2:#101016;
+  --panel:#14141B;
+  --panel-2:#191922;
+  --edge:#24242F;
+  --edge-2:#2E2E3B;
+  --red:#E01427;
+  --red-hi:#FF2A3D;
+  --red-deep:#8C0C18;
+  --star:#F4F4F6;
+  --text:#ECECF1;
+  --text-dim:#9A9AA8;
+  --text-faint:#5C5C6B;
+  --grid:#17171F;
 }
-
-* {
-  box-sizing: border-box;
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--void);
+  color:var(--text);
+  font-family:'Space Grotesk',system-ui,sans-serif;
+  min-height:100vh;
+  position:relative;
+  overflow-x:hidden;
 }
-
-html {
-  min-height: 100%;
-  background: var(--bg);
-}
-
-body {
-  min-height: 100%;
-  margin: 0;
-  color: var(--text);
-  font-family: var(--sans);
+body::before{
+  content:"";
+  position:fixed; inset:0; z-index:0; pointer-events:none;
   background:
-    radial-gradient(circle at 15% 0%, rgba(255, 184, 77, 0.18), transparent 32rem),
-    radial-gradient(circle at 85% 12%, rgba(125, 220, 255, 0.12), transparent 30rem),
-    linear-gradient(180deg, #080b12 0%, #0b1020 44%, #070a10 100%);
+    radial-gradient(1px 1px at 20% 30%, rgba(244,244,246,.7), transparent),
+    radial-gradient(1px 1px at 65% 15%, rgba(244,244,246,.5), transparent),
+    radial-gradient(1.4px 1.4px at 80% 60%, rgba(244,244,246,.6), transparent),
+    radial-gradient(1px 1px at 40% 80%, rgba(244,244,246,.45), transparent),
+    radial-gradient(1px 1px at 90% 40%, rgba(244,244,246,.5), transparent),
+    radial-gradient(1px 1px at 12% 65%, rgba(244,244,246,.4), transparent),
+    radial-gradient(1.2px 1.2px at 55% 48%, rgba(244,244,246,.5), transparent);
+  background-repeat:no-repeat;
+  opacity:.5;
 }
-
-body::before {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  content: "";
+body::after{
+  content:"";
+  position:fixed; inset:0; z-index:0; pointer-events:none;
   background-image:
-    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(to bottom, black, transparent 75%);
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size:48px 48px;
+  mask-image:linear-gradient(to bottom, black, transparent 78%);
+  opacity:.9;
 }
-
-a {
-  color: inherit;
-}
-
-button,
-input,
-select {
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
-}
-
-.page-shell {
-  width: min(1180px, calc(100% - 32px));
-  margin: 0 auto;
-  padding: 28px 0 40px;
-}
-
-.hero,
-.panel,
-.stat-card {
-  border: 1px solid var(--stroke);
-  background: var(--panel);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(18px);
-}
-
-.hero {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 24px;
-  overflow: hidden;
-  min-height: 300px;
-  padding: clamp(28px, 5vw, 54px);
-  border-radius: var(--radius-xl);
-}
-
-.hero::after {
-  position: absolute;
-  right: -100px;
-  bottom: -170px;
-  width: 520px;
-  height: 520px;
-  border: 1px solid rgba(255, 184, 77, 0.16);
-  border-radius: 50%;
-  content: "";
-}
-
-.hero__content {
-  position: relative;
-  z-index: 1;
-}
-
-.eyebrow,
-.section-kicker {
-  margin: 0 0 10px;
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-h1,
-h2,
-h3,
-p {
-  margin-top: 0;
-}
-
-h1,
-h2,
-h3 {
-  font-family: var(--display);
-  letter-spacing: -0.02em;
-}
-
-h1 {
-  max-width: 780px;
-  margin-bottom: 18px;
-  font-size: clamp(2.7rem, 8vw, 6.2rem);
-  line-height: 0.88;
-}
-
-h2 {
-  margin-bottom: 0;
-  font-size: clamp(1.25rem, 2.2vw, 1.8rem);
-}
-
-.hero__lead {
-  max-width: 680px;
-  margin-bottom: 28px;
-  color: var(--muted);
-  font-size: clamp(1.05rem, 2vw, 1.28rem);
-  line-height: 1.55;
-}
-
-.hero__meta {
-  display: inline-flex;
-  max-width: 100%;
-  padding: 10px 14px;
-  border: 1px solid rgba(255, 184, 77, 0.22);
-  border-radius: 999px;
-  color: #ffdca3;
-  background: var(--accent-soft);
-  font-family: var(--mono);
-  font-size: 0.78rem;
-}
-
-.orbit-mark {
-  position: relative;
-  z-index: 1;
-  align-self: center;
-  justify-self: center;
-  width: 220px;
-  height: 220px;
-  border: 1px solid rgba(255, 184, 77, 0.24);
-  border-radius: 50%;
-}
-
-.orbit-mark::before {
-  position: absolute;
-  inset: 36px;
-  border: 1px dashed rgba(125, 220, 255, 0.28);
-  border-radius: 50%;
-  content: "";
-}
-
-.orbit-mark::after {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 74px;
-  height: 74px;
-  border-radius: 50%;
-  background: radial-gradient(circle, #fff2c9 0 2px, var(--accent) 3px 16px, rgba(255, 122, 69, 0.42) 17px 100%);
-  box-shadow: 0 0 70px rgba(255, 184, 77, 0.38);
-  transform: translate(-50%, -50%);
-  content: "";
-}
-
-.orbit-mark span {
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--cyan);
-  box-shadow: 0 0 16px rgba(125, 220, 255, 0.8);
-}
-
-.orbit-mark span:nth-child(1) { top: 20px; left: 96px; }
-.orbit-mark span:nth-child(2) { right: 24px; bottom: 58px; background: var(--accent); }
-.orbit-mark span:nth-child(3) { left: 38px; bottom: 42px; }
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  margin: 16px 0;
-}
-
-.stat-card {
-  padding: 20px;
-  border-radius: var(--radius-lg);
-}
-
-.stat-card--ghost {
-  background: rgba(12, 18, 31, 0.68);
-}
-
-.stat-card__label {
-  display: block;
-  margin-bottom: 8px;
-  color: var(--muted-2);
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.stat-card__value {
-  display: block;
-  font-family: var(--display);
-  font-size: clamp(1.8rem, 4vw, 3.1rem);
-  line-height: 1;
-}
-
-.stat-card__value--small {
-  font-size: clamp(1.05rem, 2vw, 1.4rem);
-  line-height: 1.2;
-}
-
-.panel {
-  margin-top: 16px;
-  padding: clamp(18px, 3vw, 28px);
-  border-radius: var(--radius-xl);
-}
-
-.section-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 20px;
-}
-
-.section-heading--tight {
-  margin-bottom: 16px;
-}
-
-.quiet-link,
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 38px;
-  padding: 9px 14px;
-  border-radius: 999px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.quiet-link,
-.btn--secondary {
-  border: 1px solid var(--stroke);
-  color: var(--muted);
-  background: rgba(255,255,255,0.03);
-}
-
-.quiet-link:hover,
-.btn--secondary:hover {
-  border-color: rgba(255, 184, 77, 0.45);
-  color: var(--text);
-}
-
-
-.context-panel {
+a{color:inherit;}
+button,input,select{font:inherit;}
+button{cursor:pointer;}
+.wrap{position:relative; z-index:1; width:min(1180px,calc(100% - 32px)); margin:0 auto; padding:28px 0 40px;}
+header.console{
+  position:relative;
+  border:1px solid var(--edge);
+  border-radius:16px;
   background:
-    linear-gradient(135deg, rgba(255, 184, 77, 0.09), transparent 34%),
-    var(--panel);
+    radial-gradient(120% 140% at 85% -20%, rgba(224,20,39,.14), transparent 55%),
+    linear-gradient(180deg, rgba(25,25,34,.92), rgba(16,16,22,.92));
+  padding:30px 32px;
+  display:flex; align-items:center; gap:26px; flex-wrap:wrap;
+  overflow:hidden;
 }
-
-.context-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+header.console::before{
+  content:"";
+  position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg, transparent, var(--red), var(--red-hi), var(--red), transparent);
+  opacity:.9;
 }
-
-.context-card {
-  min-height: 160px;
-  padding: 18px;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-lg);
-  background: rgba(255,255,255,0.035);
+.insignia{
+  width:104px; height:104px; flex-shrink:0;
+  filter:drop-shadow(0 0 22px rgba(224,20,39,.35));
+  animation:float 6s ease-in-out infinite;
 }
-
-.context-card strong {
-  display: block;
-  margin-bottom: 10px;
-  color: #ffdca3;
-  font-family: var(--display);
-  font-size: 1.05rem;
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.brand-block{flex:1; min-width:240px;}
+.wordmark{display:flex; align-items:flex-end; gap:10px; margin:0 0 8px;}
+.wordmark .main{
+  font-family:'Chakra Petch',sans-serif;
+  font-size:clamp(36px,7vw,72px);
+  line-height:.85;
+  font-weight:700;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--star);
+  text-shadow:0 0 26px rgba(224,20,39,.18);
 }
-
-.context-card p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1.45;
+.wordmark .tag{
+  font-family:'Space Mono',monospace;
+  color:var(--red-hi);
+  font-size:11px;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  padding-bottom:7px;
 }
-
-.latest-list {
-  display: grid;
-  gap: 10px;
+.brand-eyebrow{
+  font-family:'Space Mono',monospace;
+  font-size:11px; letter-spacing:.34em; text-transform:uppercase;
+  color:var(--red-hi); margin:0 0 8px; display:flex; align-items:center; gap:10px;
 }
-
-.latest-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: center;
-  padding: 14px 16px;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-md);
-  background: rgba(255,255,255,0.035);
+.brand-eyebrow::after{content:""; flex:1; height:1px; background:linear-gradient(90deg,var(--red),transparent); max-width:160px;}
+.brand-title{
+  font-family:'Chakra Petch',sans-serif; font-weight:700;
+  font-size:clamp(26px,4vw,40px); margin:0; line-height:1;
+  letter-spacing:.14em; text-transform:uppercase;
 }
-
-.latest-item strong {
-  display: block;
-  overflow: hidden;
-  margin-bottom: 5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.brand-title .dot{color:var(--red);}
+.brand-sub{color:var(--text-dim); font-size:13.5px; margin:12px 0 0; max-width:580px; line-height:1.55;}
+.console-meta{display:flex; gap:26px; flex-wrap:wrap; margin-left:auto;}
+.console-meta .m .n{font-family:'Chakra Petch',sans-serif; font-size:26px; font-weight:700; color:var(--star); line-height:1;}
+.console-meta .m .n.small{font-size:15px; font-family:'Space Mono',monospace;}
+.console-meta .m .l{font-family:'Space Mono',monospace; font-size:9.5px; color:var(--text-faint); letter-spacing:.12em; text-transform:uppercase; margin-top:6px;}
+#statusBanner{
+  margin:16px 0 0; padding:12px 16px; border:1px solid var(--red-deep);
+  background:rgba(224,20,39,.09); border-radius:10px;
+  font-family:'Space Mono',monospace; font-size:12px; color:var(--text); line-height:1.5;
 }
-
-.latest-item span,
-.card-meta,
-.result-count,
-.empty-state {
-  color: var(--muted);
+#statusBanner code{background:rgba(0,0,0,.35); padding:1px 5px; border-radius:4px; color:var(--red-hi);}
+.telemetry{
+  margin-top:16px; border:1px solid var(--edge); border-radius:14px;
+  background:linear-gradient(180deg,var(--panel),var(--void-2));
+  padding:18px 22px 12px;
 }
-
-.search-row {
-  margin-bottom: 14px;
+.telemetry-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; gap:12px;}
+.telemetry-head h2{font-family:'Chakra Petch',sans-serif; margin:0; font-size:17px; letter-spacing:.08em; text-transform:uppercase;}
+.telemetry-head span{font-family:'Space Mono',monospace; color:var(--text-faint); font-size:10px;}
+.chart{width:100%; height:140px; display:block; overflow:visible;}
+.chart .axis{stroke:var(--edge); stroke-width:1;}
+.chart .bar{fill:rgba(224,20,39,.64); transition:fill .14s;}
+.chart .bar:hover{fill:var(--red-hi);}
+.chart .line{stroke:var(--red-hi); stroke-width:2.4; fill:none; filter:drop-shadow(0 0 5px rgba(224,20,39,.75));}
+.chart text{font-family:'Space Mono',monospace; fill:var(--text-faint); font-size:11px;}
+.stats{display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-top:16px;}
+@media (max-width:900px){.stats{grid-template-columns:repeat(2,1fr);}}
+.stat-card{
+  position:relative; min-height:78px; border:1px solid var(--edge); border-radius:12px;
+  background:linear-gradient(180deg,var(--panel),var(--void-2)); padding:14px 15px 12px;
+  overflow:hidden; cursor:pointer; transition:border-color .14s, transform .12s, background .14s;
 }
-
-.search-box,
-.filter-grid label {
-  display: grid;
-  gap: 8px;
+.stat-card::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--c); opacity:.8; transition:width .14s;}
+.stat-card:hover{transform:translateY(-2px); border-color:var(--edge-2);}
+.stat-card.active{background:linear-gradient(180deg,var(--panel-2),var(--panel)); border-color:var(--c);}
+.stat-card.active::before{width:4px; box-shadow:0 0 14px var(--c);}
+.stat-card .num{font-family:'Chakra Petch',sans-serif; font-size:26px; font-weight:700; color:var(--c); line-height:1;}
+.stat-card .lbl{font-size:11.5px; color:var(--text-dim); margin-top:5px; line-height:1.25;}
+.tabs{display:flex; gap:0; margin-top:30px; border-bottom:1px solid var(--edge);}
+.tab-btn{
+  font-family:'Chakra Petch',sans-serif; font-size:13px; letter-spacing:.1em; font-weight:600;
+  background:none; border:none; color:var(--text-faint); padding:12px 20px 14px; cursor:pointer;
+  border-bottom:2px solid transparent; text-transform:uppercase; position:relative; top:1px;
 }
-
-.search-box span,
-.filter-grid span {
-  color: var(--muted-2);
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.tab-btn.active{color:var(--star); border-bottom-color:var(--red);}
+.controls{display:grid; grid-template-columns:1fr auto auto auto; gap:12px; margin-top:18px; align-items:center;}
+@media (max-width:900px){.controls{grid-template-columns:1fr;}}
+.search-box{position:relative;}
+.search-box input, select{
+  width:100%; min-height:44px; border:1px solid var(--edge); background:rgba(16,16,22,.82);
+  color:var(--text); outline:none; border-radius:10px; padding:0 14px;
+  font-family:'Space Grotesk',system-ui,sans-serif; transition:border-color .14s, box-shadow .14s;
 }
-
-input,
-select {
-  width: 100%;
-  min-height: 46px;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-md);
-  color: var(--text);
-  background: rgba(6, 10, 18, 0.72);
-  outline: none;
+.search-box input:focus, select:focus, button:focus-visible, a:focus-visible{border-color:var(--red); box-shadow:0 0 0 3px rgba(224,20,39,.14); outline:none;}
+select{min-width:165px; color:var(--text-dim);}
+.tag-chips{display:flex; flex-wrap:wrap; gap:7px; margin-top:12px;}
+.chip{
+  font-family:'Space Mono',monospace; font-size:10px; color:var(--text-dim);
+  border:1px solid var(--edge); background:var(--void-2); border-radius:100px; padding:5px 10px; cursor:pointer;
+  transition:all .13s;
 }
-
-input {
-  padding: 0 16px;
+.chip:hover{border-color:var(--red-deep); color:var(--text);}
+.chip.active{background:var(--red); border-color:var(--red); color:#fff; font-weight:700; box-shadow:0 0 14px rgba(224,20,39,.4);}
+.results-count{margin-top:18px; font-family:'Space Mono',monospace; font-size:11px; color:var(--text-faint); letter-spacing:.06em; text-transform:uppercase; display:flex; align-items:center; gap:8px;}
+.results-count::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--red); box-shadow:0 0 8px var(--red);}
+.quick-row{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;}
+.tool-btn{
+  min-height:34px; border:1px solid var(--edge); border-radius:8px; padding:7px 12px;
+  background:var(--void-2); color:var(--text-dim); font-family:'Space Mono',monospace; font-size:10.5px;
+  text-transform:uppercase; letter-spacing:.06em; transition:all .14s;
 }
-
-select {
-  padding: 0 38px 0 14px;
+.tool-btn:hover{border-color:var(--red); color:var(--red-hi); background:rgba(224,20,39,.06);}
+.latest-strip{display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-top:14px;}
+@media (max-width:900px){.latest-strip{grid-template-columns:1fr;}}
+.latest-card{border:1px solid var(--edge); border-radius:10px; background:linear-gradient(180deg,var(--panel),var(--void-2)); padding:12px 13px; text-decoration:none; overflow:hidden;}
+.latest-card:hover{border-color:var(--red-deep);}
+.latest-card .code{font-family:'Space Mono',monospace; font-size:10px; color:var(--red-hi); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.latest-card .ttl{font-size:12.5px; color:var(--text); margin-top:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.latest-card .meta{font-family:'Space Mono',monospace; font-size:9.5px; color:var(--text-faint); margin-top:5px;}
+.grid{margin-top:14px; display:grid; grid-template-columns:1fr; gap:9px;}
+.doc-card{
+  position:relative; display:flex; gap:14px; align-items:flex-start;
+  border:1px solid var(--edge); border-radius:11px;
+  background:linear-gradient(180deg,var(--panel),var(--void-2));
+  padding:14px 16px; text-decoration:none; color:var(--text); overflow:hidden;
+  transition:border-color .14s, transform .12s;
 }
-
-input:focus,
-select:focus,
-button:focus-visible,
-a:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(255, 184, 77, 0.16);
-  outline: none;
+.doc-card::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--c,var(--red)); opacity:.85;}
+.doc-card:hover{transform:translateX(2px); border-color:var(--edge-2);}
+.doc-card .doc-main{flex:1; min-width:0;}
+.doc-card .doc-title{font-weight:700; letter-spacing:.01em; line-height:1.28;}
+.doc-card .doc-title mark{background:rgba(224,20,39,.32); color:var(--star); border-radius:3px;}
+.doc-card .doc-code{font-family:'Space Mono',monospace; font-size:10px; color:var(--red-hi); margin-bottom:5px; letter-spacing:.06em;}
+.doc-card .doc-meta{font-family:'Space Mono',monospace; font-size:10.5px; color:var(--text-faint); margin-top:6px; display:flex; gap:9px; flex-wrap:wrap;}
+.doc-card .doc-tags{margin-top:9px; display:flex; gap:5px; flex-wrap:wrap;}
+.doc-card .tag{font-family:'Space Mono',monospace; font-size:9.5px; color:var(--text-dim); background:var(--void-2); border:1px solid var(--edge); border-radius:5px; padding:2px 7px;}
+.doc-card .arrow{color:var(--text-faint); font-size:15px; padding-top:3px; transition:color .14s, transform .14s;}
+.doc-card:hover .arrow{color:var(--red-hi); transform:translate(2px,-2px);}
+.ds-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:11px; margin-top:14px;}
+@media (max-width:800px){.ds-grid{grid-template-columns:1fr;}}
+.ds-card{position:relative; border:1px solid var(--edge); border-radius:12px; background:linear-gradient(180deg,var(--panel),var(--void-2)); padding:18px 20px; overflow:hidden; transition:border-color .14s, transform .12s;}
+.ds-card::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--red);}
+.ds-card:hover{transform:translateY(-2px); border-color:var(--edge-2);}
+.ds-card .ds-head{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:baseline;}
+.ds-card .ds-name{font-family:'Chakra Petch',sans-serif; font-weight:700; font-size:16px; letter-spacing:.03em;}
+.ds-card .ds-name mark{background:rgba(224,20,39,.32); color:var(--star); border-radius:3px;}
+.ds-card .ds-type{font-family:'Space Mono',monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--red-hi); border:1px solid rgba(224,20,39,.35); border-radius:100px; padding:3px 10px;}
+.ds-card .ds-maker{color:var(--text-faint); font-size:11px; font-family:'Space Mono',monospace; margin-top:3px;}
+.ds-card p{font-size:13px; color:var(--text-dim); line-height:1.55; margin:12px 0 8px;}
+.ds-card .ds-use{font-size:12px; color:var(--text); background:var(--void-2); border-left:2px solid var(--red); padding:8px 11px; border-radius:6px; margin:8px 0;}
+.ds-card .tags{display:flex; flex-wrap:wrap; gap:5px; margin-top:10px;}
+.ds-card .tag{font-family:'Space Mono',monospace; font-size:9.5px; color:var(--text-dim); background:var(--void-2); border:1px solid var(--edge); border-radius:5px; padding:2px 7px;}
+.ds-card .ds-links{display:flex; gap:9px; margin-top:14px; flex-wrap:wrap;}
+.ds-card .ds-links a{font-family:'Space Mono',monospace; font-size:11px; color:var(--text); text-decoration:none; border:1px solid var(--edge); border-radius:8px; padding:7px 12px; transition:all .14s;}
+.ds-card .ds-links a:hover{border-color:var(--red); color:var(--red-hi); background:rgba(224,20,39,.06);}
+.empty-state{text-align:center; padding:64px 20px; color:var(--text-faint); font-family:'Space Mono',monospace; font-size:13px;}
+footer{margin-top:48px; padding-top:20px; border-top:1px solid var(--edge); font-family:'Space Mono',monospace; font-size:10.5px; color:var(--text-faint); display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+.sig{color:var(--text-dim);}
+@media (max-width:640px){
+  .wrap{width:min(100% - 18px,1180px); padding-top:10px;}
+  header.console{padding:22px 20px;}
+  .insignia{width:76px;height:76px;}
+  .console-meta{width:100%; gap:18px;}
+  .tabs{overflow-x:auto;}
+  .tab-btn{white-space:nowrap; padding-left:14px; padding-right:14px;}
 }
-
-.filter-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.active-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.filter-pill,
-.tag-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  padding: 7px 11px;
-  border: 1px solid var(--stroke);
-  border-radius: 999px;
-  color: var(--muted);
-  background: rgba(255,255,255,0.035);
-  font-size: 0.88rem;
-}
-
-.filter-pill strong,
-.tag-pill strong {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.subsystem-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.subsystem-card {
-  min-height: 126px;
-  padding: 16px;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-lg);
-  color: var(--text);
-  background: rgba(255,255,255,0.035);
-  text-align: left;
-}
-
-.subsystem-card:hover,
-.subsystem-card[aria-pressed="true"],
-.tag-pill[aria-pressed="true"] {
-  border-color: var(--stroke-strong);
-  background: var(--accent-soft);
-}
-
-.subsystem-card span {
-  display: block;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-}
-
-.subsystem-card strong {
-  display: block;
-  margin: 8px 0 10px;
-  font-family: var(--display);
-  font-size: 1rem;
-  line-height: 1.15;
-}
-
-.subsystem-card em {
-  color: var(--accent);
-  font-style: normal;
-  font-family: var(--mono);
-}
-
-.tag-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tag-pill {
-  cursor: pointer;
-}
-
-.activity-chart {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(42px, 1fr));
-  align-items: end;
-  gap: 10px;
-  min-height: 210px;
-  padding-top: 14px;
-}
-
-.month-bar {
-  display: grid;
-  align-items: end;
-  gap: 8px;
-  min-height: 180px;
-}
-
-.month-bar__bar {
-  min-height: 6px;
-  border: 1px solid rgba(255, 184, 77, 0.28);
-  border-radius: 999px 999px 5px 5px;
-  background: linear-gradient(180deg, rgba(255,184,77,0.9), rgba(255,122,69,0.46));
-  box-shadow: 0 0 24px rgba(255, 184, 77, 0.16);
-}
-
-.month-bar__label,
-.month-bar__value {
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  text-align: center;
-}
-
-.results-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.result-card {
-  display: flex;
-  flex-direction: column;
-  min-height: 245px;
-  padding: 18px;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-lg);
-  background: rgba(255,255,255,0.035);
-}
-
-.result-card__top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.badge {
-  display: inline-flex;
-  padding: 5px 8px;
-  border: 1px solid rgba(125, 220, 255, 0.22);
-  border-radius: 999px;
-  color: #bfefff;
-  background: rgba(125, 220, 255, 0.08);
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  text-transform: uppercase;
-}
-
-.result-card h3 {
-  margin-bottom: 8px;
-  font-size: 1.12rem;
-  line-height: 1.25;
-}
-
-.card-code {
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  word-break: break-word;
-}
-
-.card-meta {
-  display: grid;
-  gap: 6px;
-  margin: 12px 0 14px;
-  font-size: 0.9rem;
-}
-
-.card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: auto;
-}
-
-.card-tag {
-  padding: 4px 7px;
-  border-radius: 999px;
-  color: var(--muted);
-  background: rgba(255,255,255,0.055);
-  font-size: 0.76rem;
-}
-
-.card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.card-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 7px 11px;
-  border: 1px solid rgba(255,184,77,0.26);
-  border-radius: 999px;
-  color: #ffdca3;
-  background: rgba(255,184,77,0.09);
-  text-decoration: none;
-  font-size: 0.88rem;
-}
-
-.card-link:hover {
-  border-color: var(--accent);
-}
-
-.empty-state {
-  margin: 20px 0 0;
-  padding: 20px;
-  border: 1px dashed var(--stroke);
-  border-radius: var(--radius-lg);
-  text-align: center;
-}
-
-.site-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 22px 4px 0;
-  color: var(--muted-2);
-  font-size: 0.88rem;
-}
-
-.is-loading .panel,
-.is-loading .stat-card {
-  opacity: 0.75;
-}
-
-@media (max-width: 980px) {
-  .hero {
-    grid-template-columns: 1fr;
-  }
-
-  .orbit-mark {
-    display: none;
-  }
-
-  .stats-grid,
-  .filter-grid,
-  .context-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .subsystem-grid,
-  .results-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .activity-chart {
-    overflow-x: auto;
-    grid-template-columns: repeat(12, minmax(54px, 1fr));
-  }
-}
-
-@media (max-width: 640px) {
-  .page-shell {
-    width: min(100% - 18px, 1180px);
-    padding-top: 10px;
-  }
-
-  .hero,
-  .panel {
-    border-radius: 20px;
-  }
-
-  .stats-grid,
-  .filter-grid,
-  .context-grid,
-  .subsystem-grid,
-  .results-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .section-heading,
-  .site-footer,
-  .latest-item {
-    flex-direction: column;
-    display: flex;
-    align-items: stretch;
-  }
-
-  .quiet-link,
-  .btn {
-    width: 100%;
-  }
-}
-
-  </style>
+</style>
 </head>
 <body>
-  <div class="page-shell">
-    <header class="hero" aria-labelledby="page-title">
-      <div class="hero__content">
-        <p class="eyebrow">Solaris Rocketry Team · Archivo Técnico Unificado</p>
-        <h1 id="page-title">Archivo Técnico Unificado</h1>
-        <p class="hero__lead">
-          Capa visual, rápida y directa sobre el sistema documental de Notion para consultar informes, memorias, manuales, documentos internos y datasheets.
-        </p>
-        <div class="hero__meta" id="syncStatus" aria-live="polite">Cargando índice documental…</div>
-      </div>
-      <div class="orbit-mark" aria-hidden="true">
-        <span></span>
-        <span></span>
-        <span></span>
-      </div>
-    </header>
+<div class="wrap">
+  <header class="console">
+    <svg class="insignia" viewBox="0 0 120 120" role="img" aria-label="Solaris">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FF2A3D"/><stop offset="1" stop-color="#8C0C18"/></linearGradient>
+      </defs>
+      <circle cx="60" cy="60" r="48" fill="none" stroke="#2E2E3B" stroke-width="2"/>
+      <path d="M60 14 L93 100 L75 100 L67 78 L42 78 L34 100 L17 100 Z" fill="url(#g)"/>
+      <path d="M58 41 L68 66 H48 Z" fill="#F4F4F6" opacity=".94"/>
+      <path d="M21 87 C42 76 74 74 99 89" fill="none" stroke="#F4F4F6" stroke-width="3" opacity=".65"/>
+    </svg>
+    <div class="brand-block">
+      <div class="wordmark"><span class="main">SOLARIS</span><span class="tag">Document Console</span></div>
+      <p class="brand-eyebrow">Archivo Técnico · Rocketry Team</p>
+      <h1 class="brand-title">Archivo Técnico<span class="dot">.</span></h1>
+      <p class="brand-sub">Buscador unificado de informes, memorias, manuales y datasheets del equipo. Notion sigue siendo la fuente maestra; esta web expone una consola pública de metadatos y accesos.</p>
+    </div>
+    <div class="console-meta" id="headerStats"></div>
+  </header>
 
+  <div id="statusBanner">Cargando <code>data/*.json</code>…</div>
 
-    <section class="panel context-panel" aria-labelledby="context-title">
-      <div class="section-heading">
-        <div>
-          <p class="section-kicker">Contexto del sistema</p>
-          <h2 id="context-title">Capa de consulta sobre Notion</h2>
-        </div>
-        <a class="quiet-link" href="https://app.notion.com/p/397b0e3a469c8051ba59db86f874e76d" target="_blank" rel="noopener">Ver noticia interna</a>
-      </div>
-      <div class="context-grid">
-        <article class="context-card">
-          <strong>No sustituye a Notion</strong>
-          <p>Notion sigue siendo el sistema maestro para editar, mantener, organizar y trazar la documentación.</p>
-        </article>
-        <article class="context-card">
-          <strong>Consulta más directa</strong>
-          <p>La web reduce navegación y ruido visual para encontrar documentos por título, código, unidad, temporada, tipo o etiqueta.</p>
-        </article>
-        <article class="context-card">
-          <strong>Permisos intactos</strong>
-          <p>La interfaz puede ser pública, pero los documentos enlazados conservan los permisos definidos en Notion o en su fuente original.</p>
-        </article>
-        <article class="context-card">
-          <strong>Base para automatización</strong>
-          <p>El índice JSON expone metadatos estructurados; no concede acceso automático al contenido privado completo.</p>
-        </article>
-      </div>
-    </section>
+  <section class="telemetry" aria-labelledby="telemetryTitle">
+    <div class="telemetry-head">
+      <h2 id="telemetryTitle">Actividad de subida · documentos por mes</h2>
+      <span id="telemetryRange"></span>
+    </div>
+    <svg class="chart" id="telemetryChart" viewBox="0 0 1000 140" preserveAspectRatio="none"></svg>
+  </section>
 
-    <section class="stats-grid" id="statsGrid" aria-label="Resumen del archivo">
-      <article class="stat-card stat-card--ghost">
-        <span class="stat-card__label">Documentos</span>
-        <strong class="stat-card__value" id="docsCount">—</strong>
-      </article>
-      <article class="stat-card stat-card--ghost">
-        <span class="stat-card__label">Datasheets</span>
-        <strong class="stat-card__value" id="datasheetsCount">—</strong>
-      </article>
-      <article class="stat-card stat-card--ghost">
-        <span class="stat-card__label">Temporadas</span>
-        <strong class="stat-card__value" id="seasonsCount">—</strong>
-      </article>
-      <article class="stat-card stat-card--ghost">
-        <span class="stat-card__label">Última subida</span>
-        <strong class="stat-card__value stat-card__value--small" id="latestUpload">—</strong>
-      </article>
-    </section>
+  <div class="stats" id="statCards"></div>
 
-    <section class="panel latest-panel" aria-labelledby="latest-title">
-      <div class="section-heading">
-        <div>
-          <p class="section-kicker">Cambios recientes</p>
-          <h2 id="latest-title">Últimos documentos sincronizados</h2>
-        </div>
-        <a class="quiet-link" href="data/all.json" target="_blank" rel="noopener">Abrir JSON completo</a>
-      </div>
-      <div class="latest-list" id="latestList"></div>
-    </section>
-
-    <section class="panel controls-panel" aria-labelledby="search-title">
-      <div class="section-heading section-heading--tight">
-        <div>
-          <p class="section-kicker">Búsqueda</p>
-          <h2 id="search-title">Filtrar archivo</h2>
-        </div>
-        <button class="btn btn--secondary" type="button" id="clearFilters">Limpiar filtros</button>
-      </div>
-
-      <div class="search-row">
-        <label class="search-box" for="searchInput">
-          <span>Buscar</span>
-          <input id="searchInput" type="search" autocomplete="off" placeholder="Código, título, unidad, tag, componente…" />
-        </label>
-      </div>
-
-      <div class="filter-grid" aria-label="Filtros principales">
-        <label>
-          <span>Vista</span>
-          <select id="viewSelect">
-            <option value="all">Documentos + datasheets</option>
-            <option value="docs">Solo documentos</option>
-            <option value="datasheets">Solo datasheets</option>
-          </select>
-        </label>
-        <label>
-          <span>Temporada</span>
-          <select id="seasonSelect">
-            <option value="">Todas las temporadas</option>
-          </select>
-        </label>
-        <label>
-          <span>Tipo</span>
-          <select id="typeSelect">
-            <option value="">Todos los tipos</option>
-          </select>
-        </label>
-        <label>
-          <span>Orden</span>
-          <select id="sortSelect">
-            <option value="recent">Más reciente</option>
-            <option value="relevance">Relevancia</option>
-            <option value="az">A → Z</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="active-filters" id="activeFilters" aria-live="polite"></div>
-    </section>
-
-    <section class="panel" aria-labelledby="subsystems-title">
-      <div class="section-heading section-heading--tight">
-        <div>
-          <p class="section-kicker">Unidades</p>
-          <h2 id="subsystems-title">Filtro por subsistema o unidad</h2>
-        </div>
-      </div>
-      <div class="subsystem-grid" id="subsystemGrid"></div>
-    </section>
-
-    <section class="panel" aria-labelledby="tags-title">
-      <div class="section-heading section-heading--tight">
-        <div>
-          <p class="section-kicker">Etiquetas</p>
-          <h2 id="tags-title">Tags frecuentes</h2>
-        </div>
-        <button class="btn btn--secondary" type="button" id="toggleTags">Ver todas</button>
-      </div>
-      <div class="tag-cloud" id="tagCloud"></div>
-    </section>
-
-    <section class="panel chart-panel" aria-labelledby="chart-title">
-      <div class="section-heading">
-        <div>
-          <p class="section-kicker">Actividad</p>
-          <h2 id="chart-title">Documentos por mes</h2>
-        </div>
-      </div>
-      <div class="activity-chart" id="activityChart" aria-label="Actividad mensual de subida de documentos"></div>
-    </section>
-
-    <main class="panel results-panel" aria-labelledby="results-title">
-      <div class="section-heading">
-        <div>
-          <p class="section-kicker">Resultados</p>
-          <h2 id="results-title">Archivo filtrado</h2>
-        </div>
-        <p class="result-count" id="resultCount">—</p>
-      </div>
-      <div class="results-grid" id="resultsGrid"></div>
-      <p class="empty-state" id="emptyState" hidden>No hay resultados con esos filtros.</p>
-    </main>
-
-    <footer class="site-footer">
-      <span>Capa pública de consulta; Notion mantiene edición, permisos y trazabilidad documental.</span>
-      <span>Solaris Rocketry Team · UVigo Aerotech</span>
-    </footer>
+  <div class="tabs">
+    <button class="tab-btn active" type="button" data-tab="docs">Documentos internos</button>
+    <button class="tab-btn" type="button" data-tab="datasheets">Datasheets Electrónica</button>
   </div>
 
-  <script>
-const SUBSYSTEMS = {
-  general: "Solaris",
-  prop: "Propulsión",
-  struct: "Estructuras y Aerodinámica",
-  dyn: "Dinámica y Control",
-  elec: "Electrónica",
-  coord: "Coordinación Técnica",
-};
+  <div id="tab-docs">
+    <div class="controls">
+      <div class="search-box">
+        <input id="searchInput" type="search" placeholder="Buscar por título, código, etiqueta, tipo, temporada o unidad…" autocomplete="off">
+      </div>
+      <select id="seasonSelect"><option value="">Todas las temporadas</option></select>
+      <select id="typeSelect"><option value="">Todos los tipos</option></select>
+      <select id="sortSelect">
+        <option value="recent">Más recientes</option>
+        <option value="relevance">Relevancia</option>
+        <option value="az">A → Z</option>
+      </select>
+    </div>
+    <div class="quick-row">
+      <button class="tool-btn" type="button" id="clearFilters">Limpiar filtros</button>
+      <button class="tool-btn" type="button" id="toggleTags">Ver todas las etiquetas</button>
+      <a class="tool-btn" href="data/all.json" target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;align-items:center;">Abrir all.json</a>
+    </div>
+    <div class="tag-chips" id="tagChips"></div>
+    <div class="latest-strip" id="latestStrip"></div>
+    <div class="results-count" id="resultsCount"></div>
+    <div class="grid" id="docsGrid"></div>
+  </div>
 
-const state = {
-  docs: [],
-  datasheets: [],
-  meta: {},
-  query: "",
-  view: "all",
-  season: "",
-  type: "",
-  sort: "recent",
-  subsystem: "",
-  tag: "",
-  showAllTags: false,
-};
+  <div id="tab-datasheets" hidden>
+    <div class="controls" style="grid-template-columns:1fr auto;">
+      <div class="search-box">
+        <input id="dsSearchInput" type="search" placeholder="Buscar por componente, fabricante, tipo o interfaz… (ej. IMU, SPI, u-blox)" autocomplete="off">
+      </div>
+      <button class="tool-btn" type="button" id="clearDsSearch">Limpiar</button>
+    </div>
+    <div class="results-count" id="dsResultsCount"></div>
+    <div class="ds-grid" id="dsGrid"></div>
+  </div>
 
-const els = {
-  syncStatus: document.getElementById("syncStatus"),
-  docsCount: document.getElementById("docsCount"),
-  datasheetsCount: document.getElementById("datasheetsCount"),
-  seasonsCount: document.getElementById("seasonsCount"),
-  latestUpload: document.getElementById("latestUpload"),
-  latestList: document.getElementById("latestList"),
-  searchInput: document.getElementById("searchInput"),
-  viewSelect: document.getElementById("viewSelect"),
-  seasonSelect: document.getElementById("seasonSelect"),
-  typeSelect: document.getElementById("typeSelect"),
-  sortSelect: document.getElementById("sortSelect"),
-  clearFilters: document.getElementById("clearFilters"),
-  activeFilters: document.getElementById("activeFilters"),
-  subsystemGrid: document.getElementById("subsystemGrid"),
-  tagCloud: document.getElementById("tagCloud"),
-  toggleTags: document.getElementById("toggleTags"),
-  activityChart: document.getElementById("activityChart"),
-  resultCount: document.getElementById("resultCount"),
-  resultsGrid: document.getElementById("resultsGrid"),
-  emptyState: document.getElementById("emptyState"),
+  <footer>
+    <span>Espejo estático de las bases <span class="sig">Documentos internos</span> y <span class="sig">Datasheets Electrónica</span> de Notion.</span>
+    <span>Solaris Rocketry Team · UVigo Aerotech</span>
+  </footer>
+</div>
+<script>
+const state={docs:[],datasheets:[],meta:null};
+const SUBSYSTEMS={
+  prop:{label:'Propulsión',color:'#E01427'},
+  struct:{label:'Estructuras & Aerodinámica',color:'#4C8DF5'},
+  dyn:{label:'Dinámica & Control',color:'#B15CFF'},
+  elec:{label:'Electrónica',color:'#22C58B'},
+  coord:{label:'Coordinación Técnica',color:'#C9CDD6'},
+  general:{label:'Solaris (general)',color:'#FF8A1E'}
 };
+const els={
+  headerStats:document.getElementById('headerStats'),
+  statusBanner:document.getElementById('statusBanner'),
+  telemetryRange:document.getElementById('telemetryRange'),
+  telemetryChart:document.getElementById('telemetryChart'),
+  statCards:document.getElementById('statCards'),
+  searchInput:document.getElementById('searchInput'),
+  seasonSelect:document.getElementById('seasonSelect'),
+  typeSelect:document.getElementById('typeSelect'),
+  sortSelect:document.getElementById('sortSelect'),
+  tagChips:document.getElementById('tagChips'),
+  latestStrip:document.getElementById('latestStrip'),
+  resultsCount:document.getElementById('resultsCount'),
+  docsGrid:document.getElementById('docsGrid'),
+  dsSearchInput:document.getElementById('dsSearchInput'),
+  dsResultsCount:document.getElementById('dsResultsCount'),
+  dsGrid:document.getElementById('dsGrid'),
+  clearFilters:document.getElementById('clearFilters'),
+  toggleTags:document.getElementById('toggleTags'),
+  clearDsSearch:document.getElementById('clearDsSearch')
+};
+let activeSub=null;
+let activeTag=null;
+let showAllTags=false;
+let allTags=[];
 
-init().catch((error) => {
-  console.error(error);
-  els.syncStatus.textContent = "Error cargando el índice documental. Revisa data/*.json.";
-  els.emptyState.hidden = false;
-  els.emptyState.textContent = "No se pudo cargar el índice documental.";
+init().catch(err=>{
+  console.error(err);
+  els.statusBanner.innerHTML='Error cargando <code>data/*.json</code>. Revisa que existan docs.json, datasheets.json y meta.json.';
+  els.docsGrid.innerHTML='<div class="empty-state">No se pudo cargar el índice documental.</div>';
 });
 
-async function init() {
-  document.body.classList.add("is-loading");
-
-  const [docs, datasheets, meta] = await Promise.all([
-    fetchJson("data/docs.json"),
-    fetchJson("data/datasheets.json"),
-    fetchJson("data/meta.json"),
+async function init(){
+  const [docs,datasheets,meta]=await Promise.all([
+    fetchJson('data/docs.json'),
+    fetchJson('data/datasheets.json'),
+    fetchJson('data/meta.json')
   ]);
-
-  state.docs = Array.isArray(docs) ? docs.map(normalizeDoc) : [];
-  state.datasheets = Array.isArray(datasheets) ? datasheets.map(normalizeDatasheet) : [];
-  state.meta = meta && typeof meta === "object" ? meta : {};
-
-  bindEvents();
-  populateSelects();
-  renderStaticSections();
-  render();
-
-  document.body.classList.remove("is-loading");
-}
-
-async function fetchJson(path) {
-  const response = await fetch(path, { cache: "no-store" });
-  if (!response.ok) throw new Error(`${path}: ${response.status}`);
-  return response.json();
-}
-
-function bindEvents() {
-  els.searchInput.addEventListener("input", () => {
-    state.query = els.searchInput.value;
-    render();
-  });
-
-  els.viewSelect.addEventListener("change", () => {
-    state.view = els.viewSelect.value;
-    render();
-  });
-
-  els.seasonSelect.addEventListener("change", () => {
-    state.season = els.seasonSelect.value;
-    render();
-  });
-
-  els.typeSelect.addEventListener("change", () => {
-    state.type = els.typeSelect.value;
-    render();
-  });
-
-  els.sortSelect.addEventListener("change", () => {
-    state.sort = els.sortSelect.value;
-    render();
-  });
-
-  els.clearFilters.addEventListener("click", () => {
-    state.query = "";
-    state.view = "all";
-    state.season = "";
-    state.type = "";
-    state.sort = "recent";
-    state.subsystem = "";
-    state.tag = "";
-    els.searchInput.value = "";
-    els.viewSelect.value = "all";
-    els.seasonSelect.value = "";
-    els.typeSelect.value = "";
-    els.sortSelect.value = "recent";
-    render();
-  });
-
-  els.toggleTags.addEventListener("click", () => {
-    state.showAllTags = !state.showAllTags;
-    els.toggleTags.textContent = state.showAllTags ? "Ver menos" : "Ver todas";
-    renderTags();
-  });
-}
-
-function populateSelects() {
-  const seasons = unique(state.docs.map((doc) => doc.season).filter(Boolean)).sort(compareSeasonDesc);
-  const types = unique([
-    ...state.docs.map((doc) => doc.tipo).filter(Boolean),
-    ...state.datasheets.map((item) => item.tipo).filter(Boolean),
-  ]).sort((a, b) => a.localeCompare(b, "es"));
-
-  replaceOptions(els.seasonSelect, [{ value: "", label: "Todas las temporadas" }, ...seasons.map((season) => ({ value: season, label: season }))]);
-  replaceOptions(els.typeSelect, [{ value: "", label: "Todos los tipos" }, ...types.map((type) => ({ value: type, label: type }))]);
-}
-
-function replaceOptions(select, options) {
-  select.replaceChildren();
-  for (const optionData of options) {
-    const option = document.createElement("option");
-    option.value = optionData.value;
-    option.textContent = optionData.label;
-    select.append(option);
-  }
-}
-
-function renderStaticSections() {
-  const seasons = unique(state.docs.map((doc) => doc.season).filter(Boolean));
-  const latestDoc = [...state.docs].sort(compareByDateDesc)[0];
-
-  els.docsCount.textContent = String(state.meta.docsCount ?? state.docs.length);
-  els.datasheetsCount.textContent = String(state.meta.datasheetsCount ?? state.datasheets.length);
-  els.seasonsCount.textContent = String(seasons.length || "—");
-  els.latestUpload.textContent = latestDoc ? formatShortDate(latestDoc.uploadedAt || latestDoc.date) : "—";
-  els.syncStatus.textContent = state.meta.updatedAt
-    ? `Última sincronización: ${formatDateTime(state.meta.updatedAt)}`
-    : "Índice documental cargado";
-
+  state.docs=(Array.isArray(docs)?docs:[]).map(normalizeDoc);
+  state.datasheets=(Array.isArray(datasheets)?datasheets:[]).map(normalizeDatasheet);
+  state.meta=meta||{};
+  setupHeader();
+  setupFilters();
+  setupStats();
+  renderTelemetry();
+  renderTags();
   renderLatest();
-  renderSubsystems();
-  renderTags();
-  renderActivityChart();
+  bindEvents();
+  renderDocs();
+  renderDatasheets();
 }
-
-function render() {
-  const results = getFilteredResults();
-  renderActiveFilters();
-  renderSubsystems();
-  renderTags();
-  renderResults(results);
+async function fetchJson(path){const r=await fetch(path,{cache:'no-store'}); if(!r.ok) throw new Error(path+' '+r.status); return r.json();}
+function normalize(value){return String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();}
+function searchBlob(obj,fields){return normalize(fields.map(f=>Array.isArray(f)?f.join(' '):f).join(' '));}
+function normalizeDoc(d){
+  const title=d.title||'(sin título)';
+  const docCode=d.docCode||'';
+  const tags=Array.isArray(d.tags)?d.tags:[];
+  const blob=d.searchText?normalize(d.searchText):searchBlob(d,[title,docCode,d.tipo,d.season,d.subsystem,d.subsystemLabel,tags,d.date,d.uploadedAt]);
+  return {...d,title,docCode,tags,_search:blob,_sortDate:d.uploadedAt||d.date||''};
 }
-
-function renderLatest() {
-  const latest = [...state.docs].sort(compareByDateDesc).slice(0, 6);
-  els.latestList.replaceChildren();
-
-  if (!latest.length) {
-    els.latestList.append(textBlock("No hay documentos publicados todavía.", "empty-inline"));
-    return;
-  }
-
-  for (const doc of latest) {
-    const item = document.createElement("article");
-    item.className = "latest-item";
-
-    const left = document.createElement("div");
-    const title = document.createElement("strong");
-    title.textContent = doc.title;
-    const meta = document.createElement("span");
-    meta.textContent = [doc.docCode, SUBSYSTEMS[doc.subsystem] || doc.subsystem, doc.tipo].filter(Boolean).join(" · ");
-    left.append(title, meta);
-
-    const right = document.createElement("span");
-    right.textContent = formatShortDate(doc.uploadedAt || doc.date);
-
-    item.append(left, right);
-    els.latestList.append(item);
-  }
+function normalizeDatasheet(ds){
+  const name=ds.name||'(sin nombre)';
+  const proyectos=Array.isArray(ds.proyectos)?ds.proyectos:[];
+  const interfaces=Array.isArray(ds.interfaces)?ds.interfaces:[];
+  const blob=ds.searchText?normalize(ds.searchText):searchBlob(ds,[name,ds.tipo,ds.fabricante,ds.desc,ds.uso,proyectos,interfaces]);
+  return {...ds,name,proyectos,interfaces,_search:blob};
 }
-
-function renderSubsystems() {
-  const counts = countBy(state.docs, (doc) => doc.subsystem || "general");
-  els.subsystemGrid.replaceChildren();
-
-  for (const [key, label] of Object.entries(SUBSYSTEMS)) {
-    const button = document.createElement("button");
-    button.className = "subsystem-card";
-    button.type = "button";
-    button.setAttribute("aria-pressed", String(state.subsystem === key));
-
-    const small = document.createElement("span");
-    small.textContent = key;
-    const strong = document.createElement("strong");
-    strong.textContent = label;
-    const count = document.createElement("em");
-    count.textContent = `${counts.get(key) || 0} docs`;
-
-    button.append(small, strong, count);
-    button.addEventListener("click", () => {
-      state.subsystem = state.subsystem === key ? "" : key;
-      render();
-    });
-    els.subsystemGrid.append(button);
-  }
+function setupHeader(){
+  const syncLabel=state.meta?.updatedAt?new Date(state.meta.updatedAt).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+  els.headerStats.innerHTML=
+    '<div class="m"><div class="n">'+state.docs.length+'</div><div class="l">Documentos</div></div>'+
+    '<div class="m"><div class="n">'+state.datasheets.length+'</div><div class="l">Datasheets</div></div>'+
+    '<div class="m"><div class="n small">'+escapeHtml(syncLabel)+'</div><div class="l">Última sync</div></div>';
+  els.statusBanner.innerHTML='Notion sigue siendo la fuente maestra. Esta consola publica <code>metadatos</code> y enlaces; los permisos reales siguen en Notion o en la fuente original. PDFs temporales en <code>/pdfs/</code> quedan públicos mientras existan.';
 }
-
-function renderTags() {
-  const tagCounts = new Map();
-  for (const doc of state.docs) {
-    for (const tag of doc.tags) tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
-  }
-
-  const tags = [...tagCounts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "es"));
-  const visibleTags = state.showAllTags ? tags : tags.slice(0, 18);
-
-  els.tagCloud.replaceChildren();
-  for (const [tag, count] of visibleTags) {
-    const button = document.createElement("button");
-    button.className = "tag-pill";
-    button.type = "button";
-    button.setAttribute("aria-pressed", String(state.tag === tag));
-    button.append(document.createTextNode(tag + " "));
-    const strong = document.createElement("strong");
-    strong.textContent = String(count);
-    button.append(strong);
-    button.addEventListener("click", () => {
-      state.tag = state.tag === tag ? "" : tag;
-      render();
-    });
-    els.tagCloud.append(button);
-  }
-
-  els.toggleTags.hidden = tags.length <= 18;
+function setupFilters(){
+  const seasons=[...new Set(state.docs.map(d=>d.season).filter(Boolean))].sort(compareSeasonDesc);
+  const types=[...new Set([...state.docs.map(d=>d.tipo),...state.datasheets.map(d=>d.tipo)].filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+  replaceOptions(els.seasonSelect,[['','Todas las temporadas'],...seasons.map(s=>[s,s])]);
+  replaceOptions(els.typeSelect,[['','Todos los tipos'],...types.map(t=>[t,t])]);
+  const tf={}; state.docs.forEach(d=>(d.tags||[]).forEach(t=>{tf[t]=(tf[t]||0)+1;}));
+  allTags=Object.entries(tf).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'es')).map(([tag,count])=>({tag,count}));
 }
-
-function renderActivityChart() {
-  const months = lastMonths(12);
-  const counts = new Map(months.map((month) => [month.key, 0]));
-
-  for (const doc of state.docs) {
-    const key = dateKey(doc.uploadedAt || doc.date);
-    if (counts.has(key)) counts.set(key, counts.get(key) + 1);
-  }
-
-  const max = Math.max(1, ...counts.values());
-  els.activityChart.replaceChildren();
-
-  for (const month of months) {
-    const value = counts.get(month.key) || 0;
-    const wrapper = document.createElement("div");
-    wrapper.className = "month-bar";
-
-    const valueEl = document.createElement("div");
-    valueEl.className = "month-bar__value";
-    valueEl.textContent = String(value);
-
-    const bar = document.createElement("div");
-    bar.className = "month-bar__bar";
-    bar.style.height = `${Math.max(6, Math.round((value / max) * 142))}px`;
-    bar.title = `${month.label}: ${value} documentos`;
-
-    const label = document.createElement("div");
-    label.className = "month-bar__label";
-    label.textContent = month.label;
-
-    wrapper.append(valueEl, bar, label);
-    els.activityChart.append(wrapper);
-  }
+function replaceOptions(select,items){
+  select.replaceChildren();
+  for(const [value,label] of items){const o=document.createElement('option'); o.value=value; o.textContent=label; select.appendChild(o);}
 }
-
-function renderActiveFilters() {
-  const filters = [];
-  if (state.query.trim()) filters.push(["Texto", state.query.trim()]);
-  if (state.view !== "all") filters.push(["Vista", state.view === "docs" ? "Solo documentos" : "Solo datasheets"]);
-  if (state.season) filters.push(["Temporada", state.season]);
-  if (state.type) filters.push(["Tipo", state.type]);
-  if (state.subsystem) filters.push(["Unidad", SUBSYSTEMS[state.subsystem] || state.subsystem]);
-  if (state.tag) filters.push(["Tag", state.tag]);
-
-  els.activeFilters.replaceChildren();
-  for (const [label, value] of filters) {
-    const pill = document.createElement("span");
-    pill.className = "filter-pill";
-    pill.append(document.createTextNode(`${label}: `));
-    const strong = document.createElement("strong");
-    strong.textContent = value;
-    pill.append(strong);
-    els.activeFilters.append(pill);
-  }
+function setupStats(){
+  const keys=['prop','struct','dyn','elec','coord','general'];
+  els.statCards.innerHTML=keys.map(k=>{
+    const i=SUBSYSTEMS[k]; const c=state.docs.filter(d=>(d.subsystem||'general')===k).length;
+    return '<button type="button" class="stat-card '+(activeSub===k?'active':'')+'" style="--c:'+i.color+'" data-sub="'+k+'"><div class="num">'+c+'</div><div class="lbl">'+escapeHtml(i.label)+'</div></button>';
+  }).join('');
+  els.statCards.querySelectorAll('.stat-card').forEach(card=>card.addEventListener('click',()=>{
+    activeSub=activeSub===card.dataset.sub?null:card.dataset.sub;
+    setupStats();
+    renderDocs();
+  }));
 }
-
-function getFilteredResults() {
-  const tokens = tokenize(state.query);
-  const hasDocOnlyFilters = Boolean(state.season || state.subsystem || state.tag);
-
-  let docs = state.view === "datasheets" ? [] : state.docs.map((doc) => ({ kind: "doc", item: doc, score: scoreDoc(doc, tokens) }));
-  let datasheets = state.view === "docs" || hasDocOnlyFilters ? [] : state.datasheets.map((item) => ({ kind: "datasheet", item, score: scoreDatasheet(item, tokens) }));
-
-  docs = docs.filter(({ item, score }) => {
-    if (tokens.length && score < 0) return false;
-    if (state.season && item.season !== state.season) return false;
-    if (state.type && item.tipo !== state.type) return false;
-    if (state.subsystem && item.subsystem !== state.subsystem) return false;
-    if (state.tag && !item.tags.includes(state.tag)) return false;
+function renderTelemetry(){
+  const byMonth={};
+  state.docs.forEach(d=>{const key=(d.date||d.uploadedAt||'').slice(0,7); if(key) byMonth[key]=(byMonth[key]||0)+1;});
+  const months=Object.keys(byMonth).sort().slice(-12);
+  if(!months.length){els.telemetryChart.innerHTML=''; els.telemetryRange.textContent='Sin datos'; return;}
+  const max=Math.max(...months.map(m=>byMonth[m]),1);
+  const W=1000,H=140,base=112,gap=18;
+  const bw=(W-gap*(months.length+1))/months.length;
+  let pts=[];
+  let svg='<line class="axis" x1="0" y1="112" x2="1000" y2="112"/>';
+  months.forEach((m,i)=>{
+    const v=byMonth[m]; const h=Math.max(5,(v/max)*82); const x=gap+i*(bw+gap); const y=base-h;
+    pts.push((x+bw/2)+','+y);
+    svg+='<rect class="bar" x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" rx="4"><title>'+m+' · '+v+' docs</title></rect>';
+    svg+='<text x="'+(x+bw/2).toFixed(1)+'" y="132" text-anchor="middle">'+escapeHtml(m.slice(2))+'</text>';
+  });
+  if(pts.length>1) svg+='<polyline class="line" points="'+pts.join(' ')+'"/>';
+  els.telemetryChart.innerHTML=svg;
+  els.telemetryRange.textContent=months[0]+' → '+months[months.length-1];
+}
+function renderTags(){
+  const shown=(showAllTags?allTags:allTags.slice(0,16));
+  els.tagChips.innerHTML=shown.map(({tag,count})=>'<button type="button" class="chip '+(activeTag===tag?'active':'')+'" data-tag="'+escapeAttr(tag)+'">'+escapeHtml(tag)+' · '+count+'</button>').join('');
+  els.tagChips.querySelectorAll('.chip').forEach(chip=>chip.addEventListener('click',()=>{
+    activeTag=activeTag===chip.dataset.tag?null:chip.dataset.tag;
+    renderTags(); renderDocs();
+  }));
+  els.toggleTags.textContent=showAllTags?'Ver menos etiquetas':'Ver todas las etiquetas';
+}
+function renderLatest(){
+  const latest=[...state.docs].sort((a,b)=>(b._sortDate||'').localeCompare(a._sortDate||'')).slice(0,3);
+  els.latestStrip.innerHTML=latest.map(d=>{
+    const href=safeUrl(d.url)||'#';
+    return '<a class="latest-card" href="'+escapeAttr(href)+'" target="_blank" rel="noopener"><div class="code">'+escapeHtml(d.docCode||d.tipo||'Documento')+'</div><div class="ttl">'+escapeHtml(d.title)+'</div><div class="meta">'+escapeHtml(labelSub(d.subsystem))+' · '+escapeHtml(formatDate(d._sortDate))+'</div></a>';
+  }).join('');
+}
+function bindEvents(){
+  els.searchInput.addEventListener('input',renderDocs);
+  els.seasonSelect.addEventListener('change',renderDocs);
+  els.typeSelect.addEventListener('change',()=>{renderDocs(); renderDatasheets();});
+  els.sortSelect.addEventListener('change',renderDocs);
+  els.clearFilters.addEventListener('click',()=>{
+    els.searchInput.value=''; els.seasonSelect.value=''; els.typeSelect.value=''; els.sortSelect.value='recent'; activeSub=null; activeTag=null;
+    setupStats(); renderTags(); renderDocs(); renderDatasheets();
+  });
+  els.toggleTags.addEventListener('click',()=>{showAllTags=!showAllTags; renderTags();});
+  els.dsSearchInput.addEventListener('input',renderDatasheets);
+  els.clearDsSearch.addEventListener('click',()=>{els.dsSearchInput.value=''; renderDatasheets();});
+  document.querySelectorAll('.tab-btn').forEach(btn=>btn.addEventListener('click',()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b===btn));
+    const tab=btn.dataset.tab;
+    document.getElementById('tab-docs').hidden=tab!=='docs';
+    document.getElementById('tab-datasheets').hidden=tab!=='datasheets';
+  }));
+}
+function renderDocs(){
+  const q=els.searchInput.value.trim();
+  const tokens=normalize(q).split(/\s+/).filter(Boolean);
+  let rows=state.docs.map(d=>({...d,_score:scoreDoc(d,tokens)})).filter(d=>{
+    if(tokens.length&&!tokens.every(t=>d._search.includes(t))) return false;
+    if(els.seasonSelect.value&&d.season!==els.seasonSelect.value) return false;
+    if(els.typeSelect.value&&d.tipo!==els.typeSelect.value) return false;
+    if(activeSub&&d.subsystem!==activeSub) return false;
+    if(activeTag&&!(d.tags||[]).includes(activeTag)) return false;
     return true;
   });
-
-  datasheets = datasheets.filter(({ item, score }) => {
-    if (tokens.length && score < 0) return false;
-    if (state.type && item.tipo !== state.type) return false;
+  const sort=els.sortSelect.value;
+  if(sort==='relevance'&&tokens.length) rows.sort((a,b)=>b._score-a._score||(b._sortDate||'').localeCompare(a._sortDate||''));
+  else if(sort==='az') rows.sort((a,b)=>a.title.localeCompare(b.title,'es'));
+  else rows.sort((a,b)=>(b._sortDate||'').localeCompare(a._sortDate||''));
+  els.resultsCount.textContent=rows.length+(rows.length===1?' documento':' documentos')+activeFiltersLabel(q);
+  if(!rows.length){els.docsGrid.innerHTML='<div class="empty-state">Sin resultados. Prueba quitando filtros o buscando por código documental.</div>'; return;}
+  els.docsGrid.innerHTML=rows.map(d=>docCard(d,q)).join('');
+}
+function scoreDoc(d,tokens){
+  if(!tokens.length) return 0;
+  const title=normalize(d.title), code=normalize(d.docCode), tags=normalize((d.tags||[]).join(' '));
+  return tokens.reduce((s,t)=>s+(code.includes(t)?8:0)+(title.includes(t)?5:0)+(tags.includes(t)?3:0)+(d._search.includes(t)?1:0),0);
+}
+function docCard(d,q){
+  const sub=SUBSYSTEMS[d.subsystem||'general']||SUBSYSTEMS.general;
+  const href=safeUrl(d.url)||'#';
+  const tags=(d.tags||[]).slice(0,6).map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join('');
+  return '<a class="doc-card" style="--c:'+sub.color+'" href="'+escapeAttr(href)+'" target="_blank" rel="noopener">'+
+    '<div class="doc-main"><div class="doc-code">'+escapeHtml(d.docCode||d.tipo||'Documento')+'</div>'+
+    '<div class="doc-title">'+highlight(d.title,q)+'</div>'+
+    '<div class="doc-meta"><span>'+escapeHtml(d.tipo||'Sin tipo')+'</span><span>'+escapeHtml(d.season||'Sin temporada')+'</span><span>'+escapeHtml(sub.label)+'</span><span>'+escapeHtml(formatDate(d._sortDate))+'</span></div>'+
+    (tags?'<div class="doc-tags">'+tags+'</div>':'')+'</div><div class="arrow">↗</div></a>';
+}
+function renderDatasheets(){
+  const q=els.dsSearchInput.value.trim();
+  const tokens=normalize(q).split(/\s+/).filter(Boolean);
+  let rows=state.datasheets.filter(ds=>{
+    if(tokens.length&&!tokens.every(t=>ds._search.includes(t))) return false;
+    if(els.typeSelect.value&&ds.tipo!==els.typeSelect.value) return false;
     return true;
-  });
-
-  const results = [...docs, ...datasheets];
-  results.sort((a, b) => {
-    if (state.sort === "relevance") return b.score - a.score || compareByResultDateDesc(a, b);
-    if (state.sort === "az") return resultTitle(a).localeCompare(resultTitle(b), "es");
-    return compareByResultDateDesc(a, b) || b.score - a.score;
-  });
-
-  return results;
+  }).sort((a,b)=>a.name.localeCompare(b.name,'es'));
+  els.dsResultsCount.textContent=rows.length+(rows.length===1?' componente':' componentes');
+  if(!rows.length){els.dsGrid.innerHTML='<div class="empty-state">Sin resultados. Prueba con el fabricante o el tipo de interfaz.</div>'; return;}
+  els.dsGrid.innerHTML=rows.map(ds=>{
+    const ints=(ds.interfaces||[]).map(i=>'<span class="tag">'+escapeHtml(i)+'</span>').join('');
+    const proj=(ds.proyectos||[]).map(p=>'<span class="tag">'+escapeHtml(p)+'</span>').join('');
+    const links=[];
+    const enlace=safeUrl(ds.enlace); const url=safeUrl(ds.url);
+    if(enlace) links.push('<a href="'+escapeAttr(enlace)+'" target="_blank" rel="noopener">Datasheet ↗</a>');
+    if(url) links.push('<a href="'+escapeAttr(url)+'" target="_blank" rel="noopener">Ver en Notion ↗</a>');
+    return '<div class="ds-card"><div class="ds-head"><div><div class="ds-name">'+highlight(ds.name,q)+'</div><div class="ds-maker">'+escapeHtml(ds.fabricante)+'</div></div><span class="ds-type">'+escapeHtml(ds.tipo)+'</span></div><p>'+escapeHtml(ds.desc)+'</p><div class="ds-use">'+escapeHtml(ds.uso)+'</div><div class="tags">'+ints+proj+'</div><div class="ds-links">'+links.join('')+'</div></div>';
+  }).join('');
 }
-
-function renderResults(results) {
-  els.resultsGrid.replaceChildren();
-  els.resultCount.textContent = `${results.length} resultado${results.length === 1 ? "" : "s"}`;
-  els.emptyState.hidden = results.length > 0;
-
-  for (const result of results) {
-    els.resultsGrid.append(result.kind === "doc" ? createDocCard(result.item) : createDatasheetCard(result.item));
-  }
+function activeFiltersLabel(q){
+  const parts=[];
+  if(q) parts.push('búsqueda');
+  if(els.seasonSelect.value) parts.push(els.seasonSelect.value);
+  if(els.typeSelect.value) parts.push(els.typeSelect.value);
+  if(activeSub) parts.push(labelSub(activeSub));
+  if(activeTag) parts.push(activeTag);
+  return parts.length?' · filtros: '+parts.join(' / '):'';
 }
-
-function createDocCard(doc) {
-  const card = document.createElement("article");
-  card.className = "result-card";
-
-  const top = document.createElement("div");
-  top.className = "result-card__top";
-  const badge = document.createElement("span");
-  badge.className = "badge";
-  badge.textContent = doc.tipo || "Documento";
-  const date = document.createElement("span");
-  date.className = "card-meta";
-  date.textContent = formatShortDate(doc.uploadedAt || doc.date);
-  top.append(badge, date);
-
-  const title = document.createElement("h3");
-  title.textContent = doc.title;
-
-  const code = document.createElement("div");
-  code.className = "card-code";
-  code.textContent = doc.docCode || "Sin código";
-
-  const meta = document.createElement("div");
-  meta.className = "card-meta";
-  appendMeta(meta, "Unidad", SUBSYSTEMS[doc.subsystem] || doc.subsystem || "—");
-  appendMeta(meta, "Temporada", doc.season || "—");
-
-  const tags = document.createElement("div");
-  tags.className = "card-tags";
-  for (const tag of doc.tags.slice(0, 8)) tags.append(tagChip(tag));
-
-  const actions = document.createElement("div");
-  actions.className = "card-actions";
-  const url = safeUrl(doc.url);
-  if (url) actions.append(linkButton(url, "Abrir en Notion"));
-
-  card.append(top, title, code, meta, tags, actions);
-  return card;
+function highlight(text,query){
+  const raw=String(text??'');
+  const token=String(query||'').trim().split(/\s+/).find(Boolean);
+  if(!token) return escapeHtml(raw);
+  const lower=raw.toLowerCase(); const pos=lower.indexOf(token.toLowerCase());
+  if(pos<0) return escapeHtml(raw);
+  return escapeHtml(raw.slice(0,pos))+'<mark>'+escapeHtml(raw.slice(pos,pos+token.length))+'</mark>'+escapeHtml(raw.slice(pos+token.length));
 }
-
-function createDatasheetCard(item) {
-  const card = document.createElement("article");
-  card.className = "result-card";
-
-  const top = document.createElement("div");
-  top.className = "result-card__top";
-  const badge = document.createElement("span");
-  badge.className = "badge";
-  badge.textContent = item.tipo || "Datasheet";
-  top.append(badge);
-
-  const title = document.createElement("h3");
-  title.textContent = item.name;
-
-  const code = document.createElement("div");
-  code.className = "card-code";
-  code.textContent = item.fabricante || "Fabricante no indicado";
-
-  const meta = document.createElement("div");
-  meta.className = "card-meta";
-  appendMeta(meta, "Uso", item.uso || "—");
-  appendMeta(meta, "Descripción", item.desc || "—");
-
-  const tags = document.createElement("div");
-  tags.className = "card-tags";
-  for (const value of [...item.interfaces, ...item.proyectos].slice(0, 8)) tags.append(tagChip(value));
-
-  const actions = document.createElement("div");
-  actions.className = "card-actions";
-  const external = safeUrl(item.enlace);
-  const notion = safeUrl(item.url);
-  if (external) actions.append(linkButton(external, "Datasheet"));
-  if (notion) actions.append(linkButton(notion, "Abrir en Notion"));
-
-  card.append(top, title, code, meta, tags, actions);
-  return card;
-}
-
-function appendMeta(container, label, value) {
-  const line = document.createElement("span");
-  line.textContent = `${label}: ${value}`;
-  container.append(line);
-}
-
-function tagChip(text) {
-  const chip = document.createElement("span");
-  chip.className = "card-tag";
-  chip.textContent = text;
-  return chip;
-}
-
-function linkButton(url, label) {
-  const link = document.createElement("a");
-  link.className = "card-link";
-  link.href = url;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  link.textContent = label;
-  return link;
-}
-
-function textBlock(text, className) {
-  const block = document.createElement("p");
-  block.className = className;
-  block.textContent = text;
-  return block;
-}
-
-function normalizeDoc(doc) {
-  const normalized = {
-    id: doc.id ?? null,
-    docCode: asString(doc.docCode),
-    subsystem: asString(doc.subsystem || "general"),
-    title: asString(doc.title || "(sin título)"),
-    tipo: asString(doc.tipo || "SinTipo"),
-    season: asString(doc.season),
-    tags: Array.isArray(doc.tags) ? doc.tags.map(asString).filter(Boolean) : [],
-    date: asString(doc.date),
-    uploadedAt: asString(doc.uploadedAt),
-    url: asString(doc.url),
-  };
-  normalized.searchText = normalizedText([
-    normalized.docCode,
-    normalized.title,
-    normalized.tipo,
-    normalized.season,
-    normalized.subsystem,
-    SUBSYSTEMS[normalized.subsystem],
-    normalized.tags.join(" "),
-    normalized.date,
-    normalized.uploadedAt,
-  ].join(" "));
-  return normalized;
-}
-
-function normalizeDatasheet(item) {
-  const normalized = {
-    name: asString(item.name || "(sin nombre)"),
-    tipo: asString(item.tipo),
-    fabricante: asString(item.fabricante),
-    desc: asString(item.desc),
-    uso: asString(item.uso),
-    proyectos: Array.isArray(item.proyectos) ? item.proyectos.map(asString).filter(Boolean) : [],
-    interfaces: Array.isArray(item.interfaces) ? item.interfaces.map(asString).filter(Boolean) : [],
-    enlace: asString(item.enlace),
-    url: asString(item.url),
-  };
-  normalized.searchText = normalizedText([
-    normalized.name,
-    normalized.tipo,
-    normalized.fabricante,
-    normalized.desc,
-    normalized.uso,
-    normalized.proyectos.join(" "),
-    normalized.interfaces.join(" "),
-  ].join(" "));
-  return normalized;
-}
-
-function scoreDoc(doc, tokens) {
-  if (!tokens.length) return 0;
-  if (!tokens.every((token) => doc.searchText.includes(token))) return -1;
-  let score = 0;
-  const title = normalizedText(doc.title);
-  const code = normalizedText(doc.docCode);
-  const tags = normalizedText(doc.tags.join(" "));
-  for (const token of tokens) {
-    if (code.includes(token)) score += 12;
-    if (title.includes(token)) score += 8;
-    if (tags.includes(token)) score += 4;
-    if (doc.searchText.includes(token)) score += 1;
-  }
-  return score;
-}
-
-function scoreDatasheet(item, tokens) {
-  if (!tokens.length) return 0;
-  if (!tokens.every((token) => item.searchText.includes(token))) return -1;
-  let score = 0;
-  const name = normalizedText(item.name);
-  const fabricante = normalizedText(item.fabricante);
-  for (const token of tokens) {
-    if (name.includes(token)) score += 10;
-    if (fabricante.includes(token)) score += 5;
-    if (item.searchText.includes(token)) score += 1;
-  }
-  return score;
-}
-
-function tokenize(value) {
-  return normalizedText(value).split(/\s+/).filter(Boolean);
-}
-
-function normalizedText(value) {
-  return asString(value)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
-function asString(value) {
-  return value == null ? "" : String(value);
-}
-
-function unique(values) {
-  return [...new Set(values)];
-}
-
-function countBy(items, getKey) {
-  const counts = new Map();
-  for (const item of items) {
-    const key = getKey(item);
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
-  return counts;
-}
-
-function compareByDateDesc(a, b) {
-  return (dateComparable(b.uploadedAt || b.date)).localeCompare(dateComparable(a.uploadedAt || a.date));
-}
-
-function compareByResultDateDesc(a, b) {
-  if (a.kind !== "doc" || b.kind !== "doc") return a.kind === "doc" ? -1 : 1;
-  return compareByDateDesc(a.item, b.item);
-}
-
-function resultTitle(result) {
-  return result.kind === "doc" ? result.item.title : result.item.name;
-}
-
-function dateComparable(value) {
-  return asString(value) || "0000-00-00";
-}
-
-function compareSeasonDesc(a, b) {
-  return seasonStart(b) - seasonStart(a) || b.localeCompare(a, "es");
-}
-
-function seasonStart(season) {
-  const match = String(season).match(/(\d{4})/);
-  return match ? Number(match[1]) : 0;
-}
-
-function safeUrl(value) {
-  try {
-    const url = new URL(value);
-    if (url.protocol === "https:" || url.protocol === "http:") return url.href;
-  } catch (_) {
-    return "";
-  }
-  return "";
-}
-
-function formatDateTime(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return asString(value);
-  return new Intl.DateTimeFormat("es-ES", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
-
-function formatShortDate(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return asString(value) || "—";
-  return new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(date);
-}
-
-function dateKey(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function lastMonths(count) {
-  const months = [];
-  const date = new Date();
-  date.setDate(1);
-  for (let i = count - 1; i >= 0; i -= 1) {
-    const d = new Date(date.getFullYear(), date.getMonth() - i, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    const label = new Intl.DateTimeFormat("es-ES", { month: "short" }).format(d).replace(".", "");
-    months.push({ key, label });
-  }
-  return months;
-}
-
-  </script>
+function labelSub(k){return (SUBSYSTEMS[k]||SUBSYSTEMS.general).label;}
+function formatDate(v){if(!v) return '—'; const d=new Date(v); if(!Number.isNaN(d.getTime())) return d.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'2-digit'}); return String(v).slice(0,10);}
+function compareSeasonDesc(a,b){return seasonNum(b)-seasonNum(a)||String(b).localeCompare(String(a),'es');}
+function seasonNum(s){const m=String(s).match(/(\d{4})\s*\/\s*(\d{2})/); return m?Number(m[1])*100+Number(m[2]):0;}
+function safeUrl(value){try{const u=new URL(String(value||''),window.location.href); if(u.protocol==='http:'||u.protocol==='https:') return u.href;}catch{} return '';}
+function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));}
+function escapeAttr(value){return escapeHtml(value);}
+</script>
 </body>
 </html>
