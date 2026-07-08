@@ -18,7 +18,7 @@ Todos son `GET` simple, sin API key:
 
 ## Uso recomendado
 
-1. Leer primero `data/meta.json` para comprobar `updatedAt`, `docsCount` y `datasheetsCount`.
+1. Leer primero `data/meta.json` para comprobar `lastContentChangeAt` y `docCount` sin descargar el índice completo.
 2. Leer `data/all.json` cuando se quiera construir un índice completo en una sola petición.
 3. Leer `data/docs.json` o `data/datasheets.json` cuando solo haga falta una familia de datos.
 
@@ -58,17 +58,12 @@ Array de componentes y datasheets de electrónica. Campos principales:
 
 ## Esquema de `meta.json`
 
-Objeto de metadatos. Campos esperados:
+Objeto pequeño de metadatos para comprobaciones rápidas por bots/agentes. No contiene el índice completo. Campos esperados:
 
-- `updatedAt` (`string ISO 8601`): última generación del índice.
-- `docsCount` (`number`): número de documentos publicados en el índice.
-- `datasheetsCount` (`number`): número de datasheets publicados en el índice.
-- `source` (`string`): origen técnico del índice, normalmente `notion-sync`.
-- `archiveName` (`string`, si está disponible): nombre público del archivo.
-- `sourceSystem` (`string`, si está disponible): sistema maestro, normalmente `Notion`.
-- `role` (`string`, si está disponible): función del repositorio como capa de consulta.
-- `accessModel` (`string`, si está disponible): nota sobre permisos.
-- `aiScope` (`string`, si está disponible): alcance real para IA/automatización.
+- `lastContentChangeAt` (`string ISO 8601 UTC`): última fecha en la que cambió el contenido real publicado en el índice (`docs` o `datasheets`). No se actualiza por una simple ejecución del pipeline si el resultado generado es idéntico al anterior.
+- `docCount` (`number`): número de documentos internos publicados en el índice.
+
+El objeto `meta` dentro de `data/all.json` mantiene campos ampliados por compatibilidad (`updatedAt`, `lastContentChangeAt`, `docsCount`, `docCount`, `datasheetsCount`, etc.). Para polling barato usa `data/meta.json`.
 
 ## PDFs temporales expuestos en `/pdfs/`
 
@@ -85,5 +80,5 @@ Mientras un PDF exista dentro de `/pdfs/`, debe tratarse como público. No se de
 - Los enlaces `url` pueden requerir sesión y permisos del workspace de Notion.
 - Usa `docCode` antes que `id` o `title` para citar documentos concretos.
 - Usa `uploadedAt` para orden cronológico fino; usa `date` solo para agrupación por día.
-- La sincronización se ejecuta mediante GitHub Actions. Puede haber desfase respecto a Notion; consulta `meta.updatedAt`.
+- La sincronización se ejecuta mediante GitHub Actions. Puede haber desfase respecto a Notion; consulta `meta.lastContentChangeAt` en `data/meta.json` para saber si cambió el contenido publicado.
 - Si estás construyendo embeddings, embebe solo los recursos públicos realmente expuestos: `data/*.json`, datasheets externos enlazados y PDFs temporales en `/pdfs/` cuando tengas una URL concreta.

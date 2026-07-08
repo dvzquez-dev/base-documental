@@ -9,6 +9,9 @@
 //
 // Requiere Node 18+ (usa fetch nativo). Sin dependencias externas.
 
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 
 // IDs de las databases (no son secretos: sin un token de integración válido
@@ -163,6 +166,51 @@ function byUploadedAtDesc(a, b) {
   return (b.uploadedAt || b.date || "").localeCompare(a.uploadedAt || a.date || "");
 }
 
+function isoNowUtc() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+async function readJsonOrNull(path) {
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    if (error && error.code === "ENOENT") return null;
+    console.warn(`No se pudo leer ${path.pathname || path}: ${error.message}`);
+    return null;
+  }
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function hashContent(value) {
+  return createHash("sha256").update(stableStringify(value)).digest("hex");
+}
+
+function extractContentPayload(allJson) {
+  return {
+    docs: Array.isArray(allJson?.docs) ? allJson.docs : [],
+    datasheets: Array.isArray(allJson?.datasheets) ? allJson.datasheets : [],
+  };
+}
+
+function resolvePreviousLastChange(previousMeta, previousAll) {
+  return (
+    previousMeta?.lastContentChangeAt ||
+    previousAll?.meta?.lastContentChangeAt ||
+    previousAll?.meta?.updatedAt ||
+    null
+  );
+}
+
 async function main() {
   console.log("Consultando Notion...");
 
@@ -176,9 +224,28 @@ async function main() {
     .map(buildDatasheet)
     .sort((a, b) => a.name.localeCompare(b.name, "es"));
 
+  const dataDir = new URL("../data/", import.meta.url);
+  const allPath = new URL("../data/all.json", import.meta.url);
+  const metaPath = new URL("../data/meta.json", import.meta.url);
+
+  const previousAll = await readJsonOrNull(allPath);
+  const previousMeta = await readJsonOrNull(metaPath);
+  const nextContentPayload = { docs, datasheets };
+  const previousContentHash = previousAll ? hashContent(extractContentPayload(previousAll)) : null;
+  const nextContentHash = hashContent(nextContentPayload);
+  const contentChanged = previousContentHash !== nextContentHash;
+  const previousLastContentChangeAt = resolvePreviousLastChange(previousMeta, previousAll);
+  const lastContentChangeAt = contentChanged || !previousLastContentChangeAt
+    ? isoNowUtc()
+    : previousLastContentChangeAt;
+
   const meta = {
-    updatedAt: new Date().toISOString(),
+    // Compatibilidad con consumidores existentes: updatedAt se mantiene, pero
+    // ya no representa "hora de build" sino última modificación real del índice.
+    updatedAt: lastContentChangeAt,
+    lastContentChangeAt,
     docsCount: docs.length,
+    docCount: docs.length,
     datasheetsCount: datasheets.length,
     source: "notion-sync",
     archiveName: "Archivo Técnico Unificado",
@@ -188,15 +255,21 @@ async function main() {
     aiScope: "Índice estructurado de metadatos; no concede acceso automático al contenido completo privado.",
   };
 
-  const fs = await import("node:fs/promises");
-  const dataDir = new URL("../data/", import.meta.url);
-  await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(new URL("../data/docs.json", import.meta.url), JSON.stringify(docs));
-  await fs.writeFile(new URL("../data/datasheets.json", import.meta.url), JSON.stringify(datasheets));
-  await fs.writeFile(new URL("../data/meta.json", import.meta.url), JSON.stringify(meta));
-  await fs.writeFile(new URL("../data/all.json", import.meta.url), JSON.stringify({ meta, docs, datasheets }));
+  const smallMeta = {
+    lastContentChangeAt,
+    docCount: docs.length,
+  };
 
-  console.log(`OK: ${docs.length} documentos, ${datasheets.length} datasheets.`);
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(new URL("../data/docs.json", import.meta.url), JSON.stringify(docs));
+  await writeFile(new URL("../data/datasheets.json", import.meta.url), JSON.stringify(datasheets));
+  await writeFile(metaPath, `${JSON.stringify(smallMeta, null, 2)}\n`);
+  await writeFile(allPath, JSON.stringify({ meta, docs, datasheets }));
+
+  console.log(
+    `OK: ${docs.length} documentos, ${datasheets.length} datasheets. ` +
+      (contentChanged ? `Cambio real detectado: ${lastContentChangeAt}.` : `Sin cambios reales desde ${lastContentChangeAt}.`)
+  );
 }
 
 main().catch((err) => {
