@@ -1,70 +1,97 @@
-# Solaris Document Console — datos para agentes / IA
- 
-> Índice de documentos internos y datasheets de electrónica del equipo de
-> cohetería universitaria Solaris (Aerotech). Datos públicos, de solo
-> lectura, sin autenticación. Se sincronizan desde Notion automáticamente
-> cada ~30 minutos.
- 
-## Endpoints (JSON, GET simple, sin API key)
- 
-- Todo en un solo archivo: https://dvzquez-dev.github.io/base-documental/data/all.json
+# Archivo Técnico Unificado de Solaris — datos para agentes / IA
+
+> Índice público de metadatos documentales y datasheets de electrónica de Solaris Rocketry Team / UVigo Aerotech. Es una capa de consulta sobre Notion: Notion sigue siendo la fuente maestra para edición, permisos y trazabilidad. Estos recursos están pensados para consulta web, automatizaciones, agentes de IA y procesos de embedding de los archivos expuestos públicamente.
+
+## Sitio principal
+
+- Interfaz humana: https://dvzquez-dev.github.io/base-documental/
+- Repositorio: https://github.com/dvzquez-dev/base-documental
+
+## Endpoints JSON públicos
+
+Todos son `GET` simple, sin API key:
+
+- Todo en una sola petición: https://dvzquez-dev.github.io/base-documental/data/all.json
 - Solo documentos internos: https://dvzquez-dev.github.io/base-documental/data/docs.json
 - Solo datasheets de electrónica: https://dvzquez-dev.github.io/base-documental/data/datasheets.json
-- Metadatos (hora de la última sincronización): https://dvzquez-dev.github.io/base-documental/data/meta.json
- 
-## Esquema — docs.json (array de objetos)
- 
-- `id` (number | null): identificador interno. **No es único**: se reutiliza
-  el mismo número entre temporadas distintas (p.ej. `id: 2009` existe tanto
-  en la temporada 2024/25 como en la 2025/26, son documentos distintos).
-- `docCode` (string | null): **código documental único**, p.ej.
-  `"Informe_S-2009_26"`. Este es el identificador que hay que usar para
-  referirse a un documento concreto sin ambigüedad — no se repite nunca,
-  a diferencia de `id` o de `title` (que sí pueden coincidir entre
-  temporadas o subsistemas). Puede venir `null` en documentos antiguos o
-  atípicos donde Notion no calculó el código.
-- `subsystem` (string): uno de `prop` (Propulsión), `struct`
-  (Estructuras&Aerodinámica), `dyn` (Dinámica&Control), `elec` (Electrónica),
-  `coord` (Coordinación Técnica), `general` (Solaris).
-- `title` (string): título del documento. Puede repetirse entre temporadas
-  (p.ej. "Informe mayo electrónica" existe una vez por curso) — para
-  distinguirlos sin ambigüedad, usa `docCode`, no `title`.
-- `tipo` (string): p.ej. "Informe", "Manual", "Tabla", "Memoria", "Carpeta", "txt".
-- `season` (string): "2024/25" o "2025/26".
-- `tags` (string[]): etiquetas libres tal como están en Notion.
-- `date` (string, YYYY-MM-DD): fecha de subida.
-- `uploadedAt` (string ISO 8601 | null): fecha y hora exactas de subida
-  (con zona horaria), tal como las devuelve Notion — p.ej.
-  `"2026-07-06T18:23:00.000Z"`. `date` es solo la parte de fecha de este
-  mismo valor, mantenida por compatibilidad con la interfaz.
-- `url` (string): enlace a la página original en Notion. Recomendado:
-  localizar el documento por `docCode` en el índice y luego usar este `url`
-  para leer su contenido completo (el índice solo trae metadata, no el
-  cuerpo del documento).
- 
-## Esquema — datasheets.json (array de objetos)
- 
-- `name`, `tipo`, `fabricante`, `desc`, `uso` (string).
-- `proyectos` (string[]): proyectos donde se usa el componente.
-- `interfaces` (string[]): interfaces eléctricas (SPI, I²C, UART, etc.).
-- `enlace` (string): URL al PDF del datasheet del fabricante.
-- `url` (string): enlace a la página en Notion.
- 
-## Esquema — meta.json
- 
-- `updatedAt` (string, ISO datetime): última sincronización con Notion.
-- `docsCount`, `datasheetsCount` (number).
-- `source` (string).
- 
+- Metadatos de sincronización: https://dvzquez-dev.github.io/base-documental/data/meta.json
+
+Uso recomendado:
+
+1. Leer primero `data/meta.json` para comprobar `updatedAt`, `docsCount` y `datasheetsCount`.
+2. Leer `data/all.json` cuando se quiera construir un índice completo en una sola petición.
+3. Leer `data/docs.json` o `data/datasheets.json` cuando solo haga falta una familia de datos.
+
+## Esquema de `docs.json`
+
+Array de documentos internos. Campos principales:
+
+- `id` (`number | null`): identificador interno. No debe asumirse único entre temporadas.
+- `docCode` (`string | null`): código documental único cuando existe, por ejemplo `Informe_S-2009_26`. Es el identificador recomendado para referirse a un documento concreto.
+- `subsystem` (`string`): código corto de unidad/subsistema. Valores conocidos: `general`, `prop`, `struct`, `dyn`, `elec`, `coord`.
+- `subsystemLabel` (`string`, si está disponible): nombre humano de la unidad/subsistema.
+- `title` (`string`): título visible. Puede repetirse entre temporadas o subsistemas.
+- `tipo` (`string`): tipo documental, por ejemplo informe, manual, memoria, tabla, carpeta o txt.
+- `season` (`string`): temporada, por ejemplo `2025/26`.
+- `tags` (`string[]`): etiquetas libres procedentes de Notion.
+- `date` (`string`, `YYYY-MM-DD`): fecha de creación/subida usada por la interfaz.
+- `uploadedAt` (`string ISO 8601 | null`): fecha y hora exactas cuando están disponibles.
+- `url` (`string`): enlace a la página original de Notion.
+- `searchText` (`string`, si está disponible): texto normalizado auxiliar para búsqueda y consumidores automáticos.
+
+El índice no incluye el cuerpo completo de los documentos. Para leer contenido completo hay que abrir `url` y respetar los permisos de Notion.
+
+## Esquema de `datasheets.json`
+
+Array de componentes y datasheets de electrónica. Campos principales:
+
+- `name` (`string`): nombre del componente.
+- `tipo` (`string`): tipo de componente.
+- `fabricante` (`string`): fabricante.
+- `desc` (`string`): descripción o notas.
+- `uso` (`string`): uso dentro del proyecto o placa.
+- `proyectos` (`string[]`): proyectos asociados.
+- `interfaces` (`string[]`): interfaces eléctricas o de comunicación.
+- `enlace` (`string`): URL externa al datasheet del fabricante cuando existe.
+- `url` (`string`): página original en Notion.
+- `searchText` (`string`, si está disponible): texto normalizado auxiliar para búsqueda y consumidores automáticos.
+
+## Esquema de `meta.json`
+
+Objeto de metadatos. Campos esperados:
+
+- `updatedAt` (`string ISO 8601`): última generación del índice.
+- `docsCount` (`number`): número de documentos publicados en el índice.
+- `datasheetsCount` (`number`): número de datasheets publicados en el índice.
+- `source` (`string`): origen técnico del índice, normalmente `notion-sync`.
+- `archiveName` (`string`, si está disponible): nombre público del archivo.
+- `sourceSystem` (`string`, si está disponible): sistema maestro, normalmente `Notion`.
+- `role` (`string`, si está disponible): función del repositorio como capa de consulta.
+- `accessModel` (`string`, si está disponible): nota sobre permisos.
+- `aiScope` (`string`, si está disponible): alcance real para IA/automatización.
+
+## PDFs temporales expuestos en `/pdfs/`
+
+Este repositorio también puede servir PDFs temporales desde:
+
+- Base pública: https://dvzquez-dev.github.io/base-documental/pdfs/
+
+Uso previsto:
+
+- exposición temporal de PDFs generados o copiados desde Drive staging;
+- descarga por herramientas externas;
+- embedding/procesamiento por agentes de IA;
+- retirada posterior por expiración o por confirmación de `EMBEBIDO_CONFIRMADO`.
+
+Mientras un PDF exista dentro de `/pdfs/`, debe tratarse como público. No se debe subir ahí ningún archivo que no pueda ser leído por terceros durante su ventana temporal.
+
 ## Notas para agentes
- 
-- No se necesita ninguna clave de Notion para leer estos archivos: son un
-  espejo público de solo lectura, no la fuente original.
-- Frescura de los datos: hasta ~30 minutos de desfase respecto a Notion.
-  Comprueba `meta.json` si necesitas saber exactamente cuándo se generaron.
-  No existe un endpoint público para forzar una sincronización inmediata.
-- Los enlaces en el campo `url` llevan a Notion y pueden requerir estar
-  autenticado en ese workspace para abrirse.
-- Estos archivos son de solo lectura: no hay ningún endpoint para escribir,
-  crear o modificar documentos desde aquí.
- 
+
+- No se necesita token de Notion para leer `data/*.json` ni PDFs ya expuestos en `/pdfs/`.
+- Estos endpoints son de solo lectura. No existe endpoint público para crear, editar o borrar documentos.
+- Los enlaces `url` pueden requerir sesión y permisos del workspace de Notion.
+- Usa `docCode` antes que `id` o `title` para citar documentos concretos.
+- Usa `uploadedAt` para orden cronológico fino; usa `date` solo para agrupación por día.
+- La sincronización se ejecuta mediante GitHub Actions. Puede haber desfase respecto a Notion; consulta `meta.updatedAt`.
+- No asumas que el índice contiene contenido privado completo. Contiene metadatos públicos y enlaces.
+- Si estás construyendo embeddings, embebe solo los recursos públicos realmente expuestos: `data/*.json`, datasheets externos enlazados y PDFs temporales en `/pdfs/` cuando tengas una URL concreta.
