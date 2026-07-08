@@ -1,8 +1,8 @@
 // scripts/sync-notion.mjs
 //
 // Lee las dos bases de datos de Notion (Documentos internos y Datasheets
-// Electrónica) y regenera data/docs.json, data/datasheets.json y
-// data/meta.json. Pensado para ejecutarse desde GitHub Actions (ver
+// Electrónica) y regenera data/docs.json, data/datasheets.json, data/meta.json
+// y data/all.json. Pensado para ejecutarse desde GitHub Actions (ver
 // .github/workflows/sync.yml), pero funciona igual en local:
 //
 //   NOTION_TOKEN=secret_xxx node scripts/sync-notion.mjs
@@ -24,6 +24,15 @@ if (!NOTION_TOKEN) {
   process.exit(1);
 }
 
+const SUBSYSTEM_MAP = {
+  Solaris: "general",
+  "Subsistema de Propulsión": "prop",
+  "Subsistema de Estructuras&Aerodinámica": "struct",
+  "Subsistema de Dinámica&Control": "dyn",
+  "Subsistema de Electrónica": "elec",
+  "Unidad de Coordinación Técnica": "coord",
+};
+
 async function queryDatabase(databaseId) {
   const results = [];
   let cursor = undefined;
@@ -32,7 +41,7 @@ async function queryDatabase(databaseId) {
     const res = await fetch(`https://api.notion.com/v1/databases/${databaseId}/query`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${NOTION_TOKEN}`,
+        Authorization: `Bearer ${NOTION_TOKEN}`,
         "Notion-Version": NOTION_VERSION,
         "Content-Type": "application/json",
       },
@@ -59,32 +68,34 @@ async function queryDatabase(databaseId) {
 const getTitle = (prop) => (prop?.title ?? []).map((t) => t.plain_text).join("");
 const getRichText = (prop) => (prop?.rich_text ?? []).map((t) => t.plain_text).join("");
 const getSelect = (prop) => prop?.select?.name ?? null;
-const getMultiSelect = (prop) => (prop?.multi_select ?? []).map((o) => o.name);
+const getMultiSelect = (prop) => (prop?.multi_select ?? []).map((o) => o.name).filter(Boolean);
 const getNumber = (prop) => (typeof prop?.number === "number" ? prop.number : null);
 const getUrlProp = (prop) => prop?.url ?? null;
 
 // Las propiedades de tipo "formula" en Notion devuelven su resultado ya
 // calculado (string, number, boolean o date, según cómo esté definida la
 // fórmula). Aquí solo nos interesa el caso de resultado en texto.
-const getFormulaString = (prop) => {
+function getFormulaString(prop) {
   if (!prop || prop.type !== "formula" || !prop.formula) return null;
-  return prop.formula.type === "string" ? (prop.formula.string ?? null) : null;
-};
+  return prop.formula.type === "string" ? prop.formula.string ?? null : null;
+}
 
-// Mapea el texto de "Subsistema o Unidad" al código corto + color usado en el front-end.
-const SUBSYSTEM_MAP = {
-  "Solaris": "general",
-  "Subsistema de Propulsión": "prop",
-  "Subsistema de Estructuras&Aerodinámica": "struct",
-  "Subsistema de Dinámica&Control": "dyn",
-  "Subsistema de Electrónica": "elec",
-  "Unidad de Coordinación Técnica": "coord",
-};
+function normalizeText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function buildSearchText(values) {
+  return normalizeText(values.filter(Boolean).join(" "));
+}
 
 function buildDoc(page) {
   const props = page.properties;
   const subsystemLabel = getSelect(props["Subsistema o Unidad"]);
-  return {
+  const doc = {
     id: getNumber(props["ID (XXXX)"]),
     // Código documental único (p.ej. "Informe_S-2009_26"), calculado por
     // Notion a partir de tipo + ID + temporada. A diferencia de "id" (que
@@ -92,6 +103,7 @@ function buildDoc(page) {
     // identificador sin ambigüedad para localizar un documento exacto.
     docCode: getFormulaString(props["Nombre en Drive de Aerotech"]),
     subsystem: SUBSYSTEM_MAP[subsystemLabel] ?? "general",
+    subsystemLabel: subsystemLabel || "Solaris",
     title: getTitle(props["Título"]) || "(sin título)",
     tipo: getSelect(props["Tipo Aerotech"]) || "SinTipo",
     season: getSelect(props["Temporada"]) || "",
@@ -104,11 +116,25 @@ function buildDoc(page) {
     uploadedAt: page.created_time || null,
     url: page.url,
   };
+
+  doc.searchText = buildSearchText([
+    doc.docCode,
+    doc.title,
+    doc.tipo,
+    doc.season,
+    doc.subsystem,
+    doc.subsystemLabel,
+    doc.tags.join(" "),
+    doc.date,
+    doc.uploadedAt,
+  ]);
+
+  return doc;
 }
 
 function buildDatasheet(page) {
   const props = page.properties;
-  return {
+  const datasheet = {
     name: getTitle(props["Nombre"]) || "(sin nombre)",
     tipo: getSelect(props["Tipo"]) || "",
     fabricante: getRichText(props["Fabricante"]) || "",
@@ -119,6 +145,22 @@ function buildDatasheet(page) {
     enlace: getUrlProp(props["Enlace"]) || "",
     url: page.url,
   };
+
+  datasheet.searchText = buildSearchText([
+    datasheet.name,
+    datasheet.tipo,
+    datasheet.fabricante,
+    datasheet.desc,
+    datasheet.uso,
+    datasheet.proyectos.join(" "),
+    datasheet.interfaces.join(" "),
+  ]);
+
+  return datasheet;
+}
+
+function byUploadedAtDesc(a, b) {
+  return (b.uploadedAt || b.date || "").localeCompare(a.uploadedAt || a.date || "");
 }
 
 async function main() {
@@ -129,27 +171,30 @@ async function main() {
     queryDatabase(DATASHEETS_DB_ID),
   ]);
 
-  const docs = docPages.map(buildDoc).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  const datasheets = dsPages.map(buildDatasheet).sort((a, b) => a.name.localeCompare(b.name));
+  const docs = docPages.map(buildDoc).sort(byUploadedAtDesc);
+  const datasheets = dsPages
+    .map(buildDatasheet)
+    .sort((a, b) => a.name.localeCompare(b.name, "es"));
 
   const meta = {
     updatedAt: new Date().toISOString(),
     docsCount: docs.length,
     datasheetsCount: datasheets.length,
     source: "notion-sync",
+    archiveName: "Archivo Técnico Unificado",
+    sourceSystem: "Notion",
+    role: "visual-access-layer",
+    accessModel: "Los enlaces conservan los permisos definidos en Notion o en la fuente original.",
+    aiScope: "Índice estructurado de metadatos; no concede acceso automático al contenido completo privado.",
   };
 
   const fs = await import("node:fs/promises");
-  await fs.mkdir(new URL("../data/", import.meta.url), { recursive: true });
+  const dataDir = new URL("../data/", import.meta.url);
+  await fs.mkdir(dataDir, { recursive: true });
   await fs.writeFile(new URL("../data/docs.json", import.meta.url), JSON.stringify(docs));
   await fs.writeFile(new URL("../data/datasheets.json", import.meta.url), JSON.stringify(datasheets));
   await fs.writeFile(new URL("../data/meta.json", import.meta.url), JSON.stringify(meta));
-  // Archivo combinado: pensado para automatizaciones externas (Zapier, Make,
-  // n8n...) que solo quieren hacer UNA petición HTTP en vez de tres.
-  await fs.writeFile(
-    new URL("../data/all.json", import.meta.url),
-    JSON.stringify({ meta, docs, datasheets })
-  );
+  await fs.writeFile(new URL("../data/all.json", import.meta.url), JSON.stringify({ meta, docs, datasheets }));
 
   console.log(`OK: ${docs.length} documentos, ${datasheets.length} datasheets.`);
 }

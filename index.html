@@ -320,113 +320,280 @@ const SUBSYSTEMS = {
   "coord":  {"label":"Coordinación Técnica",       "color":"#C9CDD6"},
   "general":{"label":"Solaris (general)",          "color":"#FF8A1E"}
 };
+
 async function loadData(){
   try{
-    const [d,s,m] = await Promise.all([
-      fetch('data/docs.json'),
-      fetch('data/datasheets.json'),
-      fetch('data/meta.json').catch(()=>null)
-    ]);
-    if(!d.ok || !s.ok) throw new Error('HTTP ' + d.status + '/' + s.status);
-    state.docs = await d.json();
-    state.datasheets = await s.json();
-    state.meta = (m && m.ok) ? await m.json() : null;
+    const bundled = await fetchJson('data/all.json').catch(() => null);
+    if (bundled && typeof bundled === 'object' && (Array.isArray(bundled.docs) || Array.isArray(bundled.datasheets))) {
+      state.docs = Array.isArray(bundled.docs) ? bundled.docs.map(normalizeDoc) : [];
+      state.datasheets = Array.isArray(bundled.datasheets) ? bundled.datasheets.map(normalizeDatasheet) : [];
+      state.meta = bundled.meta && typeof bundled.meta === 'object' ? bundled.meta : null;
+    } else {
+      const [docs, datasheets, meta] = await Promise.all([
+        fetchJson('data/docs.json'),
+        fetchJson('data/datasheets.json'),
+        fetchJson('data/meta.json').catch(() => null)
+      ]);
+      state.docs = Array.isArray(docs) ? docs.map(normalizeDoc) : [];
+      state.datasheets = Array.isArray(datasheets) ? datasheets.map(normalizeDatasheet) : [];
+      state.meta = meta && typeof meta === 'object' ? meta : null;
+    }
     boot();
   }catch(err){
     const b = document.getElementById('statusBanner');
     b.style.display = 'block';
-    b.innerHTML = 'No se pudieron cargar los datos (' + err.message + '). Si abriste este archivo con doble clic, el navegador bloquea las peticiones a archivos locales. Sírvelo con <code>python3 -m http.server</code> o publícalo en GitHub Pages.';
+    b.innerHTML = 'No se pudieron cargar los datos (' + escapeHtml(err.message) + '). Si abriste este archivo con doble clic, el navegador bloquea las peticiones a archivos locales. Sírvelo con <code>python3 -m http.server</code> o publícalo en GitHub Pages.';
   }
 }
+
+async function fetchJson(path){
+  const res = await fetch(path, { cache: 'no-store' });
+  if(!res.ok) throw new Error(path + ': HTTP ' + res.status);
+  return res.json();
+}
+
+function asString(value){ return value == null ? '' : String(value); }
+function unique(values){ return [...new Set(values)]; }
+function normalizedText(value){
+  return asString(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+function tokenize(value){ return normalizedText(value).split(/\s+/).filter(Boolean); }
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function highlight(t,q){t=String(t); if(!q) return escapeHtml(t); const i=t.toLowerCase().indexOf(q.toLowerCase()); if(i<0) return escapeHtml(t); return escapeHtml(t.slice(0,i))+'<mark>'+escapeHtml(t.slice(i,i+q.length))+'</mark>'+escapeHtml(t.slice(i+q.length));}
+function safeUrl(value){
+  try{
+    const url = new URL(value, window.location.href);
+    if(url.protocol === 'https:' || url.protocol === 'http:') return url.href;
+  }catch(_){/* noop */}
+  return '';
+}
+function formatShortDate(value){
+  const date = new Date(value);
+  if(Number.isNaN(date.getTime())) return asString(value) || '—';
+  return new Intl.DateTimeFormat('es-ES', { day:'2-digit', month:'short', year:'numeric' }).format(date);
+}
+function formatSyncDate(value){
+  const date = new Date(value);
+  if(Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('es-ES', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }).format(date);
+}
+function dateComparable(value){ return asString(value) || '0000-00-00'; }
+function compareByDateDesc(a,b){ return dateComparable(b.uploadedAt || b.date).localeCompare(dateComparable(a.uploadedAt || a.date)); }
+function seasonStart(season){ const m = String(season).match(/(\d{4})/); return m ? Number(m[1]) : 0; }
+function compareSeasonDesc(a,b){ return seasonStart(b) - seasonStart(a) || String(b).localeCompare(String(a), 'es'); }
+function dateKey(value){
+  const date = new Date(value);
+  if(Number.isNaN(date.getTime())) return asString(value).slice(0,7);
+  return date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0');
+}
+function monthLabel(key){
+  const [y,m] = String(key).split('-');
+  const n = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return (n[parseInt(m,10)-1] || m || '') + " '" + String(y || '').slice(2);
+}
+function highlight(text, query){
+  text = asString(text);
+  const tokens = tokenize(query);
+  if(!tokens.length) return escapeHtml(text);
+  const lower = text.toLowerCase();
+  const token = tokens.find(t => lower.includes(t));
+  if(!token) return escapeHtml(text);
+  const i = lower.indexOf(token);
+  if(i < 0) return escapeHtml(text);
+  return escapeHtml(text.slice(0,i)) + '<mark>' + escapeHtml(text.slice(i,i+token.length)) + '</mark>' + escapeHtml(text.slice(i+token.length));
+}
+
+function normalizeDoc(doc){
+  const subsystem = asString(doc.subsystem || 'general');
+  const normalized = {
+    id: doc.id ?? null,
+    docCode: asString(doc.docCode),
+    subsystem,
+    subsystemLabel: asString(doc.subsystemLabel || SUBSYSTEMS[subsystem]?.label || subsystem),
+    title: asString(doc.title || '(sin título)'),
+    tipo: asString(doc.tipo || 'SinTipo'),
+    season: asString(doc.season),
+    tags: Array.isArray(doc.tags) ? doc.tags.map(asString).filter(Boolean) : [],
+    date: asString(doc.date),
+    uploadedAt: asString(doc.uploadedAt),
+    url: asString(doc.url)
+  };
+  normalized.searchText = asString(doc.searchText) || normalizedText([
+    normalized.docCode,
+    normalized.title,
+    normalized.tipo,
+    normalized.season,
+    normalized.subsystem,
+    normalized.subsystemLabel,
+    normalized.tags.join(' '),
+    normalized.date,
+    normalized.uploadedAt
+  ].join(' '));
+  return normalized;
+}
+function normalizeDatasheet(item){
+  const normalized = {
+    name: asString(item.name || '(sin nombre)'),
+    tipo: asString(item.tipo),
+    fabricante: asString(item.fabricante),
+    desc: asString(item.desc),
+    uso: asString(item.uso),
+    proyectos: Array.isArray(item.proyectos) ? item.proyectos.map(asString).filter(Boolean) : [],
+    interfaces: Array.isArray(item.interfaces) ? item.interfaces.map(asString).filter(Boolean) : [],
+    enlace: asString(item.enlace),
+    url: asString(item.url)
+  };
+  normalized.searchText = asString(item.searchText) || normalizedText([
+    normalized.name,
+    normalized.tipo,
+    normalized.fabricante,
+    normalized.desc,
+    normalized.uso,
+    normalized.proyectos.join(' '),
+    normalized.interfaces.join(' ')
+  ].join(' '));
+  return normalized;
+}
+function scoreDoc(doc, tokens){
+  if(!tokens.length) return 0;
+  if(!tokens.every(token => doc.searchText.includes(token))) return -1;
+  let score = 0;
+  const title = normalizedText(doc.title);
+  const code = normalizedText(doc.docCode);
+  const tags = normalizedText(doc.tags.join(' '));
+  const subsystem = normalizedText(doc.subsystemLabel);
+  for(const token of tokens){
+    if(code === token) score += 18;
+    else if(code.includes(token)) score += 12;
+    if(title.startsWith(token)) score += 10;
+    else if(title.includes(token)) score += 8;
+    if(tags.includes(token)) score += 4;
+    if(subsystem.includes(token)) score += 3;
+    if(doc.searchText.includes(token)) score += 1;
+  }
+  return score;
+}
+function scoreDatasheet(item, tokens){
+  if(!tokens.length) return 0;
+  if(!tokens.every(token => item.searchText.includes(token))) return -1;
+  let score = 0;
+  const name = normalizedText(item.name);
+  const fabricante = normalizedText(item.fabricante);
+  const interfaces = normalizedText(item.interfaces.join(' '));
+  for(const token of tokens){
+    if(name.startsWith(token)) score += 12;
+    else if(name.includes(token)) score += 10;
+    if(fabricante.includes(token)) score += 5;
+    if(interfaces.includes(token)) score += 5;
+    if(item.searchText.includes(token)) score += 1;
+  }
+  return score;
+}
+
 function boot(){
   const DOCS = state.docs, DATASHEETS = state.datasheets;
-  const seasons = [...new Set(DOCS.map(d=>d.season))].filter(Boolean).sort();
-  const syncLabel = state.meta && state.meta.updatedAt
-    ? new Date(state.meta.updatedAt).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+  const syncLabel = state.meta && state.meta.updatedAt ? formatSyncDate(state.meta.updatedAt) : '—';
   document.getElementById('headerStats').innerHTML =
     '<div class="m"><div class="n">'+DOCS.length+'</div><div class="l">Documentos</div></div>'+
     '<div class="m"><div class="n">'+DATASHEETS.length+'</div><div class="l">Datasheets</div></div>'+
     '<div class="m"><div class="n small">'+syncLabel+'</div><div class="l">Última sync</div></div>';
-  // telemetry
-  function mk(d){return (d||'').slice(0,7);}
-  function ml(k){const[y,m]=k.split('-');const n=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];return n[parseInt(m,10)-1]+" '"+y.slice(2);}
-  const counts={}; DOCS.forEach(d=>{const k=mk(d.date); if(k) counts[k]=(counts[k]||0)+1;});
+
+  const counts={};
+  DOCS.forEach(d=>{const k=dateKey(d.uploadedAt || d.date); if(k) counts[k]=(counts[k]||0)+1;});
   const keys=Object.keys(counts).sort();
-  document.getElementById('telemetryRange').textContent = keys.length? (ml(keys[0])+"  →  "+ml(keys[keys.length-1])) : "";
+  document.getElementById('telemetryRange').textContent = keys.length ? (monthLabel(keys[0])+'  →  '+monthLabel(keys[keys.length-1])) : '';
   (function(){
     const svg=document.getElementById('telemetryChart'); const W=1000,H=140,pL=8,pR=8,pT=16,pB=22; const n=keys.length; if(!n)return;
     const mx=Math.max(...keys.map(k=>counts[k]));
     const x=i=>pL+(i/Math.max(n-1,1))*(W-pL-pR); const y=v=>H-pB-(v/mx)*(H-pT-pB);
-    let path="M "+x(0)+" "+y(counts[keys[0]]); for(let i=1;i<n;i++)path+=" L "+x(i)+" "+y(counts[keys[i]]);
-    const area=path+" L "+x(n-1)+" "+(H-pB)+" L "+x(0)+" "+(H-pB)+" Z";
-    let g=""; for(let r=0;r<=2;r++){const yy=pT+r*((H-pT-pB)/2); g+='<line x1="'+pL+'" y1="'+yy+'" x2="'+(W-pR)+'" y2="'+yy+'" stroke="var(--grid)" stroke-width="1"/>';}
-    let lab=""; const st=Math.max(1,Math.round(n/9)); for(let i=0;i<n;i+=st)lab+='<text class="chart-axis-label" x="'+x(i)+'" y="'+(H-5)+'" text-anchor="middle">'+ml(keys[i])+'</text>';
-    let dots=""; for(let i=0;i<n;i++)dots+='<circle cx="'+x(i)+'" cy="'+y(counts[keys[i]])+'" r="2.8" fill="var(--red-hi)"><title>'+ml(keys[i])+': '+counts[keys[i]]+' documentos</title></circle>';
-    svg.innerHTML='<defs><linearGradient id="af" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E01427" stop-opacity=".38"/><stop offset="100%" stop-color="#E01427" stop-opacity="0"/></linearGradient>'+
-      '<filter id="gl"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'+
-      g+'<path d="'+area+'" fill="url(#af)"/><path d="'+path+'" fill="none" stroke="#E01427" stroke-width="2" filter="url(#gl)"/>'+dots+lab;
+    let path='M '+x(0)+' '+y(counts[keys[0]]); for(let i=1;i<n;i++)path+=' L '+x(i)+' '+y(counts[keys[i]]);
+    const area=path+' L '+x(n-1)+' '+(H-pB)+' L '+x(0)+' '+(H-pB)+' Z';
+    let g=''; for(let r=0;r<=2;r++){const yy=pT+r*((H-pT-pB)/2); g+='<line x1="'+pL+'" y1="'+yy+'" x2="'+(W-pR)+'" y2="'+yy+'" stroke="var(--grid)" stroke-width="1"/>';}
+    let lab=''; const st=Math.max(1,Math.round(n/9)); for(let i=0;i<n;i+=st)lab+='<text class="chart-axis-label" x="'+x(i)+'" y="'+(H-5)+'" text-anchor="middle">'+monthLabel(keys[i])+'</text>';
+    let dots=''; for(let i=0;i<n;i++)dots+='<circle cx="'+x(i)+'" cy="'+y(counts[keys[i]])+'" r="2.8" fill="var(--red-hi)"><title>'+monthLabel(keys[i])+': '+counts[keys[i]]+' documentos</title></circle>';
+    svg.innerHTML='<defs><linearGradient id="af" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E01427" stop-opacity=".38"/><stop offset="100%" stop-color="#E01427" stop-opacity="0"/></linearGradient>'+ '<filter id="gl"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'+g+'<path d="'+area+'" fill="url(#af)"/><path d="'+path+'" fill="none" stroke="#E01427" stroke-width="2" filter="url(#gl)"/>'+dots+lab;
   })();
-  // stat cards
+
   let activeSub=null;
   const scEl=document.getElementById('statCards');
   function renderSC(){
     scEl.innerHTML=Object.entries(SUBSYSTEMS).map(([k,i])=>{
       const c=DOCS.filter(d=>d.subsystem===k).length;
-      return '<div class="stat-card '+(activeSub===k?'active':'')+'" style="--c:'+i.color+'" data-sub="'+k+'"><div class="num">'+c+'</div><div class="lbl">'+i.label+'</div></div>';
+      return '<div class="stat-card '+(activeSub===k?'active':'')+'" style="--c:'+i.color+'" data-sub="'+escapeHtml(k)+'"><div class="num">'+c+'</div><div class="lbl">'+escapeHtml(i.label)+'</div></div>';
     }).join('');
     scEl.querySelectorAll('.stat-card').forEach(c=>c.addEventListener('click',()=>{activeSub=activeSub===c.dataset.sub?null:c.dataset.sub; renderSC(); renderDocs();}));
   }
   renderSC();
+
+  const searchInput=document.getElementById('searchInput');
+  const seasonSelect=document.getElementById('seasonSelect');
   const typeSelect=document.getElementById('typeSelect');
-  [...new Set(DOCS.map(d=>d.tipo))].filter(Boolean).sort().forEach(t=>typeSelect.innerHTML+='<option value="'+t+'">'+t+'</option>');
+  const docsGrid=document.getElementById('docsGrid');
+  const resultsCount=document.getElementById('resultsCount');
+  const dsInput=document.getElementById('dsSearchInput');
+  const dsGrid=document.getElementById('dsGrid');
+  const dsCount=document.getElementById('dsResultsCount');
+
+  const seasons = unique(DOCS.map(d=>d.season).filter(Boolean)).sort(compareSeasonDesc);
+  seasonSelect.innerHTML = '<option value="">Todas las temporadas</option>' + seasons.map(s=>'<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+'</option>').join('');
+  const docTypes = unique(DOCS.map(d=>d.tipo).filter(Boolean)).sort((a,b)=>a.localeCompare(b,'es'));
+  typeSelect.innerHTML = '<option value="">Todos los tipos</option>' + docTypes.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('');
+
   const tf={}; DOCS.forEach(d=>(d.tags||[]).forEach(t=>tf[t]=(tf[t]||0)+1));
-  const topTags=Object.entries(tf).sort((a,b)=>b[1]-a[1]).slice(0,16).map(e=>e[0]);
+  const topTags=Object.entries(tf).sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],'es')).slice(0,18).map(e=>e[0]);
   let activeTag=null; const tcEl=document.getElementById('tagChips');
   function renderTC(){
     tcEl.innerHTML=topTags.map(t=>'<button class="chip '+(activeTag===t?'active':'')+'" data-tag="'+escapeHtml(t)+'">'+escapeHtml(t)+' <span style="opacity:.55">'+tf[t]+'</span></button>').join('');
     tcEl.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{activeTag=activeTag===c.dataset.tag?null:c.dataset.tag; renderTC(); renderDocs();}));
   }
   renderTC();
-  const searchInput=document.getElementById('searchInput'), seasonSelect=document.getElementById('seasonSelect');
-  const docsGrid=document.getElementById('docsGrid'), resultsCount=document.getElementById('resultsCount');
+
   function renderDocs(){
-    const q=searchInput.value.trim().toLowerCase(), season=seasonSelect.value, type=typeSelect.value;
-    let r=DOCS.filter(d=>{
-      if(activeSub&&d.subsystem!==activeSub)return false;
-      if(season&&d.season!==season)return false;
-      if(type&&d.tipo!==type)return false;
-      if(activeTag&&!(d.tags||[]).includes(activeTag))return false;
-      if(q){const h=(d.title+' '+d.tipo+' '+d.season+' '+(SUBSYSTEMS[d.subsystem]||{}).label+' '+(d.docCode||'')+' '+(d.tags||[]).join(' ')).toLowerCase(); if(!h.includes(q))return false;}
+    const q=searchInput.value.trim();
+    const tokens=tokenize(q);
+    const season=seasonSelect.value, type=typeSelect.value;
+    let r=DOCS.map(d=>({doc:d, score:scoreDoc(d,tokens)})).filter(({doc,score})=>{
+      if(activeSub&&doc.subsystem!==activeSub)return false;
+      if(season&&doc.season!==season)return false;
+      if(type&&doc.tipo!==type)return false;
+      if(activeTag&&!(doc.tags||[]).includes(activeTag))return false;
+      if(tokens.length&&score<0)return false;
       return true;
     });
-    r.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    r.sort((a,b)=>tokens.length ? (b.score-a.score || compareByDateDesc(a.doc,b.doc)) : compareByDateDesc(a.doc,b.doc));
     resultsCount.textContent=r.length+(r.length===1?' documento':' documentos');
     if(!r.length){docsGrid.innerHTML='<div class="empty-state">Sin resultados para estos filtros. Prueba con otra etiqueta o borra la búsqueda.</div>';return;}
-    docsGrid.innerHTML=r.map(d=>{
-      const info=SUBSYSTEMS[d.subsystem]||{label:d.subsystem,color:'#C9CDD6'};
+    docsGrid.innerHTML=r.map(({doc:d})=>{
+      const info=SUBSYSTEMS[d.subsystem]||{label:d.subsystemLabel||d.subsystem,color:'#C9CDD6'};
       const tags=d.tags||[]; const th=tags.slice(0,7).map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join('');
       const more=tags.length>7?'<span class="tag">+'+(tags.length-7)+'</span>':'';
       const code=d.docCode?'<span class="doc-code">'+escapeHtml(d.docCode)+'</span>':'';
-      return '<a class="doc-card" style="--c:'+info.color+'" href="'+d.url+'" target="_blank" rel="noopener"><div class="body"><div class="top-line"><div class="title">'+highlight(d.title,q)+code+'</div><div class="meta"><span class="c">'+info.label+'</span> · '+escapeHtml(d.tipo)+' · '+escapeHtml(d.season)+' · '+(d.date||'')+'</div></div><div class="tags">'+th+more+'</div></div><div class="arrow">↗</div></a>';
+      const url=safeUrl(d.url);
+      return '<a class="doc-card" style="--c:'+info.color+'" href="'+escapeHtml(url||'#')+'" target="_blank" rel="noopener"><div class="body"><div class="top-line"><div class="title">'+highlight(d.title,q)+code+'</div><div class="meta"><span class="c">'+escapeHtml(info.label)+'</span> · '+escapeHtml(d.tipo)+' · '+escapeHtml(d.season)+' · '+escapeHtml(formatShortDate(d.uploadedAt||d.date))+'</div></div><div class="tags">'+th+more+'</div></div><div class="arrow">↗</div></a>';
     }).join('');
   }
   searchInput.addEventListener('input',renderDocs); seasonSelect.addEventListener('change',renderDocs); typeSelect.addEventListener('change',renderDocs);
   renderDocs();
-  const dsInput=document.getElementById('dsSearchInput'), dsGrid=document.getElementById('dsGrid'), dsCount=document.getElementById('dsResultsCount');
+
   function renderDS(){
-    const q=dsInput.value.trim().toLowerCase();
-    let r=DATASHEETS.filter(ds=>{if(!q)return true; const h=(ds.name+' '+ds.tipo+' '+ds.fabricante+' '+ds.desc+' '+ds.uso+' '+(ds.proyectos||[]).join(' ')+' '+(ds.interfaces||[]).join(' ')).toLowerCase(); return h.includes(q);});
+    const q=dsInput.value.trim();
+    const tokens=tokenize(q);
+    let r=DATASHEETS.map(ds=>({ds, score:scoreDatasheet(ds,tokens)})).filter(({score})=>!tokens.length || score>=0);
+    r.sort((a,b)=>tokens.length ? (b.score-a.score || a.ds.name.localeCompare(b.ds.name,'es')) : a.ds.name.localeCompare(b.ds.name,'es'));
     dsCount.textContent=r.length+(r.length===1?' componente':' componentes');
     if(!r.length){dsGrid.innerHTML='<div class="empty-state">Sin resultados. Prueba con el fabricante o el tipo de interfaz.</div>';return;}
-    dsGrid.innerHTML=r.map(ds=>{
+    dsGrid.innerHTML=r.map(({ds})=>{
       const ints=(ds.interfaces||[]).map(i=>'<span class="tag">'+escapeHtml(i)+'</span>').join('');
       const proj=(ds.proyectos||[]).map(p=>'<span class="tag">'+escapeHtml(p)+'</span>').join('');
-      return '<div class="ds-card"><div class="ds-head"><div><div class="ds-name">'+highlight(ds.name,q)+'</div><div class="ds-maker">'+escapeHtml(ds.fabricante)+'</div></div><span class="ds-type">'+escapeHtml(ds.tipo)+'</span></div><p>'+escapeHtml(ds.desc)+'</p><div class="ds-use">'+escapeHtml(ds.uso)+'</div><div class="tags">'+ints+proj+'</div><div class="ds-links">'+(ds.enlace?'<a href="'+ds.enlace+'" target="_blank" rel="noopener">Datasheet ↗</a>':'')+'<a href="'+ds.url+'" target="_blank" rel="noopener">Ver en Notion ↗</a></div></div>';
+      const external=safeUrl(ds.enlace), notion=safeUrl(ds.url);
+      return '<div class="ds-card"><div class="ds-head"><div><div class="ds-name">'+highlight(ds.name,q)+'</div><div class="ds-maker">'+escapeHtml(ds.fabricante)+'</div></div><span class="ds-type">'+escapeHtml(ds.tipo)+'</span></div><p>'+escapeHtml(ds.desc)+'</p><div class="ds-use">'+escapeHtml(ds.uso)+'</div><div class="tags">'+ints+proj+'</div><div class="ds-links">'+(external?'<a href="'+escapeHtml(external)+'" target="_blank" rel="noopener">Datasheet ↗</a>':'')+(notion?'<a href="'+escapeHtml(notion)+'" target="_blank" rel="noopener">Ver en Notion ↗</a>':'')+'</div></div>';
     }).join('');
   }
   dsInput.addEventListener('input',renderDS); renderDS();
+
   document.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>{
     document.querySelectorAll('.tab-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active');
     document.getElementById('tab-docs').style.display=b.dataset.tab==='docs'?'block':'none';
