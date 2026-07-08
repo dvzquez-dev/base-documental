@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """
 publish_temp_pdfs.py — Publicación temporal de PDFs de Solaris para embebido en Notion.
- 
+
 Lee la pestaña "COLA_PUBLICACION_TEMPORAL_PDF" de la Google Sheet "Solaris - Registro
 documental" y:
- 
+
   1. Para filas con estado=PENDIENTE: descarga el archivo de Drive, lo escribe en
      pdfs/<filename> de este repo, y marca la fila como PUBLICADO con la URL pública
      resultante (servida por GitHub Pages) y una fecha de expiración.
   2. Para filas con estado=EMBEBIDO_CONFIRMADO (Claude ya lo embebió en Notion con
      éxito), o estado=PUBLICADO cuya fecha_expira ya pasó: borra pdfs/<filename> del
-     repo y marca la fila como EXPIRADO.
- 
+     repo y marca la fila como EXPIRADO. Además intenta mover la copia de staging en
+     Drive a la papelera; si falla, reintenta en ciclos siguientes hasta
+     MAX_DRIVE_CLEANUP_ATTEMPTS veces (el número de intento se guarda dentro del
+     propio texto de "notas"), y a partir de ahí deja de reintentar y marca la fila
+     como estado=LIMPIEZA_IGNORADA (terminal, no bloqueante — el embebido en Notion
+     ya está confirmado y no depende de esta limpieza).
+
 Pensado para ejecutarse cada 10-15 minutos vía GitHub Actions. Hace commit y push de
 los cambios en pdfs/ cuando hay alguno.
- 
+
 Requiere una service account de Google con:
   - Acceso de Editor a UNA carpeta de staging dedicada en el Drive personal de
     Daniel (carpeta "STAGING_TEMP_PDF_SOLARIS", no la carpeta general del
@@ -23,44 +28,54 @@ Requiere una service account de Google con:
     pasa a EMBEBIDO_CONFIRMADO, también la borra (por eso hace falta Editor,
     no solo Lector).
   - Acceso de edición (Editor) a la Google Sheet "Solaris - Registro documental".
- 
+
 Las credenciales llegan por la variable de entorno GDRIVE_SA_KEY (el JSON de la
 service account, como texto o en base64).
 """
- 
+
 import base64
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from datetime import datetime, timedelta, timezone
- 
+
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
- 
+
 SPREADSHEET_ID = "1EL5luWUYD5_3onxaDUSHmexzzQZEkPNLW1Y4QzzRg20"
 SHEET_NAME = "COLA_PUBLICACION_TEMPORAL_PDF"
 PDFS_DIR = "pdfs"
 PUBLIC_BASE_URL = "https://dvzquez-dev.github.io/base-documental/pdfs"
 EXPIRY_HOURS = 48
- 
+
+# Limite de reintentos para mover la copia de staging en Drive a la papelera.
+# Sabemos (ver CONFIG.DRIVE_STAGING_CLEANUP_DIAGNOSIS) que esto puede fallar
+# indefinidamente por una politica de organizacion del Workspace de la
+# asociacion, ajena a este script. Reintentar para siempre no tiene sentido:
+# tras este numero de intentos fallidos, se marca la fila como estado
+# terminal LIMPIEZA_IGNORADA en vez de seguir reintentando cada ciclo.
+MAX_DRIVE_CLEANUP_ATTEMPTS = 4
+RETRY_ATTEMPT_RE = re.compile(r"intento (\d+)/\d+")
+
 SCOPES = [
     # Necesitamos escritura (no solo readonly) porque tambien borramos la
     # copia de staging en Drive una vez confirmado el embebido en Notion.
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
 ]
- 
+
 # El orden debe coincidir exactamente con la fila de cabecera de la hoja.
 COLUMNS = [
     "request_id", "drive_file_id", "filename", "fecha_solicitud",
     "estado", "fecha_publicado", "public_url", "fecha_expira", "notas",
 ]
- 
- 
+
+
 def get_credentials():
     raw = os.environ.get("GDRIVE_SA_KEY", "").strip()
     if not raw:
@@ -88,12 +103,12 @@ def get_credentials():
             )
             sys.exit(1)
     return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
- 
- 
+
+
 def now_iso():
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
- 
- 
+
+
 def parse_iso(value):
     if not value:
         return None
@@ -101,8 +116,8 @@ def parse_iso(value):
         return datetime.fromisoformat(value)
     except ValueError:
         return None
- 
- 
+
+
 def read_rows(sheets):
     resp = sheets.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
@@ -114,8 +129,8 @@ def read_rows(sheets):
         row = row + [""] * (len(COLUMNS) - len(row))
         rows.append({"row_number": i, **dict(zip(COLUMNS, row))})
     return rows
- 
- 
+
+
 def write_row(sheets, row_number, updates: dict):
     data = []
     for col_name, value in updates.items():
@@ -129,8 +144,8 @@ def write_row(sheets, row_number, updates: dict):
         spreadsheetId=SPREADSHEET_ID,
         body={"valueInputOption": "RAW", "data": data},
     ).execute()
- 
- 
+
+
 def download_drive_file(drive, file_id: str) -> bytes:
     request = drive.files().get_media(fileId=file_id)
     buf = io.BytesIO()
@@ -139,8 +154,8 @@ def download_drive_file(drive, file_id: str) -> bytes:
     while not done:
         _, done = downloader.next_chunk()
     return buf.getvalue()
- 
- 
+
+
 def git(*args, check=True):
     result = subprocess.run(["git", *args], capture_output=True, text=True)
     if result.stdout.strip():
@@ -150,11 +165,11 @@ def git(*args, check=True):
     if check and result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} fallo (codigo {result.returncode}): {result.stderr.strip()}")
     return result
- 
- 
+
+
 def git_commit_and_push_with_retry(max_attempts=5):
     """Hace commit de lo que haya en el working tree y empuja con reintentos.
- 
+
     Otro workflow de este mismo repo (sync de Notion) commitea cada ~2 minutos
     a la misma rama, asi que un `git push` directo puede fallar por
     non-fast-forward si hay una carrera. En cada intento fallido, hacemos
@@ -170,7 +185,7 @@ def git_commit_and_push_with_retry(max_attempts=5):
     commit_result = git("commit", "-m", "Publicar/retirar PDFs temporales de Solaris", check=False)
     if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stdout:
         raise RuntimeError(f"git commit fallo: {commit_result.stderr.strip()}")
- 
+
     for attempt in range(1, max_attempts + 1):
         push_result = git("push", "origin", "HEAD:main", check=False)
         if push_result.returncode == 0:
@@ -186,23 +201,23 @@ def git_commit_and_push_with_retry(max_attempts=5):
             # Conflicto real de contenido (poco probable, tocamos solo pdfs/nuevos archivos).
             git("rebase", "--abort", check=False)
             raise RuntimeError(f"git rebase fallo, no se pudo resolver el conflicto automaticamente: {rebase_result.stderr.strip()}")
- 
- 
+
+
 def main():
     creds = get_credentials()
     sheets = build("sheets", "v4", credentials=creds)
     drive = build("drive", "v3", credentials=creds)
- 
+
     os.makedirs(PDFS_DIR, exist_ok=True)
     rows = read_rows(sheets)
     changed = False
     now = datetime.now(timezone.utc).astimezone()
- 
+
     for row in rows:
         estado = row["estado"]
         filename = row["filename"]
         path = os.path.join(PDFS_DIR, filename) if filename else None
- 
+
         if estado == "PENDIENTE":
             try:
                 content = download_drive_file(drive, row["drive_file_id"])
@@ -224,7 +239,7 @@ def main():
                     "notas": f"Fallo al publicar: {exc}",
                 })
                 print(f"ERROR publicando {filename}: {exc}", file=sys.stderr)
- 
+
         elif estado == "EMBEBIDO_CONFIRMADO":
             if path and os.path.exists(path):
                 os.remove(path)
@@ -248,15 +263,39 @@ def main():
                 print(f"Copia de staging en Drive movida a la papelera: {filename}")
             except Exception as exc:
                 print(f"Aviso: no se pudo mover a la papelera la copia de staging en Drive ({filename}), se reintentara en el proximo ciclo: {exc}", file=sys.stderr)
- 
+
             if drive_deleted:
                 write_row(sheets, row["row_number"], {"estado": "EXPIRADO"})
                 print(f"Retirado (embebido confirmado): {filename}")
             else:
-                write_row(sheets, row["row_number"], {
-                    "notas": f"Pendiente de reintento: fallo al borrar copia de staging en Drive ({now_iso()}).",
-                })
- 
+                # Contamos cuantos intentos van ya, leyendo el numero que dejamos
+                # en la nota del intento anterior (no anadimos columna nueva a
+                # la Sheet para no tener que tocar la estructura existente).
+                previous_notas = row.get("notas") or ""
+                match = RETRY_ATTEMPT_RE.search(previous_notas)
+                attempt = (int(match.group(1)) if match else 0) + 1
+
+                if attempt >= MAX_DRIVE_CLEANUP_ATTEMPTS:
+                    write_row(sheets, row["row_number"], {
+                        "estado": "LIMPIEZA_IGNORADA",
+                        "notas": (
+                            f"No se pudo mover a la papelera la copia de staging tras "
+                            f"{attempt} intentos (limite de politica de organizacion del "
+                            f"Workspace, ver CONFIG.DRIVE_STAGING_CLEANUP_DIAGNOSIS). Se "
+                            f"deja de reintentar automaticamente; el embebido en Notion ya "
+                            f"esta confirmado y no depende de esto. Limpieza manual posible "
+                            f"desde Drive si se quiere. ({now_iso()})"
+                        ),
+                    })
+                    print(f"Limite de reintentos alcanzado ({attempt}/{MAX_DRIVE_CLEANUP_ATTEMPTS}) para {filename}: se marca LIMPIEZA_IGNORADA.")
+                else:
+                    write_row(sheets, row["row_number"], {
+                        "notas": (
+                            f"Pendiente de reintento (intento {attempt}/{MAX_DRIVE_CLEANUP_ATTEMPTS}): "
+                            f"fallo al borrar copia de staging en Drive ({now_iso()})."
+                        ),
+                    })
+
         elif estado == "PUBLICADO":
             expira = parse_iso(row["fecha_expira"])
             if expira and now >= expira:
@@ -265,13 +304,12 @@ def main():
                     changed = True
                 write_row(sheets, row["row_number"], {"estado": "EXPIRADO"})
                 print(f"Retirado (expirado): {filename}")
- 
+
     if changed:
         git_commit_and_push_with_retry()
     else:
         print("Sin cambios.")
- 
- 
+
+
 if __name__ == "__main__":
     main()
- 
