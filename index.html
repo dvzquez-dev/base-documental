@@ -766,58 +766,6 @@
     .archive-copy{text-align:left;}
   }
 
-
-  /* ---------- HEADER V9: ajuste compacto para 100% zoom / pantallas 2K ---------- */
-  @media (min-width:900px) and (max-height:860px){
-    .wrap{padding-top:18px;}
-    header.console{
-      padding-top:clamp(34px,3vw,46px);
-      padding-bottom:clamp(30px,2.7vw,42px);
-    }
-    .identity-row{
-      --identity-h:clamp(226px,16.4vw,284px);
-      --badge-size:clamp(204px,14.8vw,258px);
-      gap:clamp(34px,4vw,64px);
-    }
-    .archive-panel{
-      margin-top:clamp(22px,2.2vw,32px);
-      padding-top:clamp(20px,1.9vw,28px);
-      padding-bottom:clamp(20px,1.9vw,28px);
-    }
-    .archive-copy{
-      margin-top:clamp(10px,.9vw,14px);
-      line-height:1.48;
-    }
-    .console-meta{
-      margin-top:clamp(16px,1.7vw,24px);
-      padding-top:clamp(16px,1.5vw,22px);
-    }
-    .console-meta .m{min-height:56px;}
-  }
-  @media (min-width:900px) and (max-height:800px){
-    header.console{
-      padding-top:34px;
-      padding-bottom:34px;
-    }
-    .identity-row{
-      --identity-h:clamp(214px,15.3vw,258px);
-      --badge-size:clamp(194px,14vw,240px);
-    }
-    .archive-panel{
-      margin-top:22px;
-      padding-top:20px;
-      padding-bottom:20px;
-    }
-    .archive-kicker{font-size:clamp(28px,2.8vw,42px);}
-    .archive-copy{font-size:clamp(15px,1.12vw,17px);}
-    .console-meta{
-      margin-top:16px;
-      padding-top:16px;
-    }
-    .console-meta .m .n{font-size:clamp(28px,2.1vw,34px);}
-    .console-meta .m .n.small{font-size:clamp(22px,1.65vw,28px);}
-  }
-
 @media (prefers-reduced-motion: reduce){*{animation:none !important; transition:none !important;}}
 </style>
 </head>
