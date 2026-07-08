@@ -1,0 +1,8 @@
+--- a/index.html
++++ b/index.html
+@@ -1,2 +1,3 @@
+- const syncLabel = state.meta && state.meta.updatedAt
+- ? new Date(state.meta.updatedAt).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
++ const syncAt = state.meta && (state.meta.lastSyncRunAt || state.meta.updatedAt);
++ const syncLabel = syncAt
++ ? new Date(syncAt).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
