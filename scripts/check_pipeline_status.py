@@ -165,10 +165,19 @@ def main():
     # de la API de Sheets en un falso "todo tranquilo".
 
     # --- Señal 1: COLA_PUBLICACION_TEMPORAL_PDF ---
+    # OJO: EMBEBIDO_CONFIRMADO se excluye a propósito. Una fila en ese estado
+    # ya tiene el trabajo de Cowork terminado (embebido en Notion verificado,
+    # el cierre del expediente NO depende de la limpieza de Drive). Lo único
+    # pendiente ahi es el propio GitHub Action reintentando mover la copia de
+    # staging a la papelera, algo que puede fallar indefinidamente por la
+    # politica de organizacion del Workspace (ver CONFIG.DRIVE_STAGING_CLEANUP_*)
+    # y que Cowork no necesita ni puede resolver. Si se incluyera aqui,
+    # cualquier fila asi dejaria debe_ejecutar_pasada_completa=true para
+    # siempre, anulando el proposito entero de este chequeo rapido.
     try:
         cola = rows_as_dicts(sheets, "COLA_PUBLICACION_TEMPORAL_PDF")
         cola_pendiente = any(
-            (row.get("estado") or "").strip() in ("PENDIENTE", "PUBLICADO", "EMBEBIDO_CONFIRMADO")
+            (row.get("estado") or "").strip() in ("PENDIENTE", "PUBLICADO")
             for row in cola
         )
     except SheetReadError as exc:
