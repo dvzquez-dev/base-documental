@@ -45,6 +45,34 @@ OUTPUT_PATH = "data/pipeline_status.json"
 META_JSON_PATH = "data/meta.json"  # generado por scripts/sync-notion.mjs en este mismo repo
 STALE_ACTION_MINUTES = 20  # umbral que usará Cowork para desconfiar de este JSON si está viejo
 
+# Señales que, si son las ÚNICAS activas, solo requieren el Paso 9 (seguimiento de
+# envíos de Gmail) en vez de la pasada completa del pipeline. Añadido 2026-07-09:
+# antes Cowork tenía que releer el objeto "señales" cada ciclo y aplicar esta regla
+# el mismo en lenguaje natural (frágil, sin memoria entre ciclos); ahora el propio
+# script decide el nivel exacto y Cowork solo lee un campo, sin reinterpretar nada.
+SEÑALES_SOLO_SEGUIMIENTO = {"seguimiento_envios_pendiente", "log_envio_ia_pendiente"}
+
+
+def calcular_nivel_pasada(señales, lecturas_fallidas):
+    """Devuelve 'NINGUNA', 'PARCIAL_SEGUIMIENTO' o 'COMPLETA'.
+
+    Reglas (en este orden):
+    1. Si alguna lectura falló de verdad (no sabemos su valor real), nunca nos
+       fiamos de un patrón que parezca "solo seguimiento" — forzamos COMPLETA.
+    2. Si ninguna señal está activa, NINGUNA (no hace falta hacer nada).
+    3. Si las únicas señales activas están dentro de SEÑALES_SOLO_SEGUIMIENTO,
+       PARCIAL_SEGUIMIENTO (basta con el Paso 9).
+    4. Cualquier otro caso, COMPLETA.
+    """
+    if lecturas_fallidas:
+        return "COMPLETA"
+    activas = {k for k, v in señales.items() if v}
+    if not activas:
+        return "NINGUNA"
+    if activas <= SEÑALES_SOLO_SEGUIMIENTO:
+        return "PARCIAL_SEGUIMIENTO"
+    return "COMPLETA"
+
 
 def get_credentials():
     raw = os.environ.get("GDRIVE_SA_KEY", "").strip()
@@ -143,17 +171,20 @@ def main():
         "señales": señales,
         "lecturas_fallidas": lecturas_fallidas,
         "debe_ejecutar_pasada_completa": True,
+        "nivel_pasada_recomendado": "COMPLETA",
         "motivo": "",
     }
 
     if emergency_stop:
         result["debe_ejecutar_pasada_completa"] = False
+        result["nivel_pasada_recomendado"] = "NINGUNA"
         result["motivo"] = "EMERGENCY_STOP activo en CONFIG: no se recalculan señales, Cowork debe detenerse en su propio Paso 0."
         write_and_push(result)
         return
 
     if checkpoint_dt is None:
         result["debe_ejecutar_pasada_completa"] = True
+        result["nivel_pasada_recomendado"] = "COMPLETA"
         result["motivo"] = "No hay CONFIG.LAST_CYCLE_CHECKPOINT_AT válido: se recomienda pasada completa por seguridad."
         write_and_push(result)
         return
@@ -280,8 +311,13 @@ def main():
         motivos.append("Notion tiene contenido más reciente que el checkpoint (lastContentChangeAt)")
 
     debe_ejecutar = any(señales.values())
-    result["debe_ejecutar_pasada_completa"] = debe_ejecutar
-    result["motivo"] = "; ".join(motivos) if motivos else "sin novedades en ninguna señal comprobada"
+    nivel = calcular_nivel_pasada(señales, lecturas_fallidas)
+    result["debe_ejecutar_pasada_completa"] = debe_ejecutar  # retrocompatibilidad / lectura humana
+    result["nivel_pasada_recomendado"] = nivel
+    if nivel == "PARCIAL_SEGUIMIENTO":
+        result["motivo"] = "solo seguimiento de envíos pendiente (" + "; ".join(motivos) + ") — basta con el Paso 9, no hace falta pasada completa"
+    else:
+        result["motivo"] = "; ".join(motivos) if motivos else "sin novedades en ninguna señal comprobada"
 
     write_and_push(result)
 
