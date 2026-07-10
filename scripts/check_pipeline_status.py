@@ -18,11 +18,30 @@ Es de SOLO LECTURA sobre Sheets (scope spreadsheets.readonly) — no escribe
 nada en la Sheet de control. La única escritura que hace este workflow es el
 commit/push de data/pipeline_status.json a este mismo repo.
 
-Limitación conocida: no puede comprobar Gmail (envíos reales de correo),
-porque eso requiere el conector OAuth de Gmail que solo tiene Cowork, no una
-service account. Ese chequeo se sigue haciendo solo durante la pasada
-completa (Paso 9, seguimiento de envíos). Las colas relacionadas con correo
-que SÍ son Sheets (SEGUIMIENTO_ENVIOS, LOG_ENVIO_IA) sí están cubiertas aquí.
+Limitación conocida y estructural, no una decisión de diseño: no puede
+comprobar Gmail (envíos reales de correo, ni si un revisor ya respondió a un
+hilo de aprobación), porque eso requiere el conector OAuth de Gmail que solo
+tiene Cowork como persona autenticada — una service account no puede leer el
+Gmail de nadie sin delegación de dominio, y este Workspace ya tiene bloqueada
+por política de organización ese tipo de delegación externa (misma familia de
+restricción que DRIVE_STAGING_CLEANUP_DIAGNOSIS). Por eso el Paso 4
+(procesar_respuesta_revisor) y el Paso 9 (seguimiento_envios_gmail) nunca
+pueden confirmarse aquí con certeza: como mucho, este script puede señalar
+"hay un borrador de aprobación esperando desde hace tiempo, merece la pena
+que Cowork compruebe Gmail" (ver pasos_necesarios.4_verificar_gmail), pero no
+puede saber si ya hay respuesta. El Paso 9 sigue siendo obligatorio en toda
+pasada completa y parcial, siempre, sin excepción.
+
+CAMBIO 2026-07-10: además del nivel_pasada_recomendado de 3 valores (NINGUNA /
+PARCIAL_SEGUIMIENTO / COMPLETA), este script ahora calcula también
+pasos_necesarios: qué pasos concretos del pipeline (1,2,3,5,6,7) tienen
+trabajo pendiente de verdad según el estado real de SOLICITUDES, RESERVAS_ID,
+SEGUIMIENTO_ENVIOS y el formulario de ingesta — determinista, sin adivinar.
+Motivo: en una PASADA COMPLETA de antes, Cowork releía los 8 pasos siempre,
+aunque 6 de ellos no tuvieran nada que hacer. Ahora puede leer solo los pasos
+que de verdad tienen trabajo. El Paso 4 (requiere Gmail) y el Paso 8 (solo se
+dispara reactivamente cuando otro paso falla, no tiene condición propia) no
+se pueden determinar aquí con certeza — ver arriba.
 
 Requiere la misma variable de entorno GDRIVE_SA_KEY (JSON de la service
 account) que ya usa publish_temp_pdfs.py.
@@ -43,7 +62,19 @@ SPREADSHEET_ID = "1EL5luWUYD5_3onxaDUSHmexzzQZEkPNLW1Y4QzzRg20"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 OUTPUT_PATH = "data/pipeline_status.json"
 META_JSON_PATH = "data/meta.json"  # generado por scripts/sync-notion.mjs en este mismo repo
-STALE_ACTION_MINUTES = 20  # umbral que usará Cowork para desconfiar de este JSON si está viejo
+STALE_ACTION_MINUTES = 90  # CAMBIO 2026-07-10 (antes 20, luego 45): ver CONFIG.QUICKCHECK_STALENESS_THRESHOLD_MINUTES,
+# que es el valor que Cowork usa de verdad (esta constante es solo documentación, mantenerla
+# sincronizada a mano). Se subió porque Cowork pasó de revisar cada hora a revisar cada 15 min:
+# con ese ciclo tan corto, el propio chequeo frecuente ya actúa de red de seguridad, y ya no
+# hace falta un umbral agresivo — un umbral demasiado corto solo generaba pasadas completas
+# de más por jitter de publicación (colas de build de GitHub Pages, contención de git entre
+# los 3 workflows que comitean a este repo), no por caídas reales del Action.
+
+# Tiempo mínimo que debe llevar un borrador de aprobación en BORRADOR_PENDIENTE antes de que
+# valga la pena decirle a Cowork "comprueba Gmail para el Paso 4" — evita marcarlo como
+# pendiente de verificación en el mismo minuto en que se creó el borrador, cuando es
+# fisicamente imposible que el revisor ya haya contestado.
+MIN_MINUTOS_ANTES_DE_VERIFICAR_GMAIL_PASO4 = 10
 
 # Señales que, si son las ÚNICAS activas, solo requieren el Paso 9 (seguimiento de
 # envíos de Gmail) en vez de la pasada completa del pipeline. Añadido 2026-07-09:
@@ -53,18 +84,24 @@ STALE_ACTION_MINUTES = 20  # umbral que usará Cowork para desconfiar de este JS
 SEÑALES_SOLO_SEGUIMIENTO = {"seguimiento_envios_pendiente", "log_envio_ia_pendiente"}
 
 
-def calcular_nivel_pasada(señales, lecturas_fallidas):
+def calcular_nivel_pasada(señales, lecturas_fallidas, pasos_necesarios):
     """Devuelve 'NINGUNA', 'PARCIAL_SEGUIMIENTO' o 'COMPLETA'.
 
     Reglas (en este orden):
     1. Si alguna lectura falló de verdad (no sabemos su valor real), nunca nos
        fiamos de un patrón que parezca "solo seguimiento" — forzamos COMPLETA.
-    2. Si ninguna señal está activa, NINGUNA (no hace falta hacer nada).
-    3. Si las únicas señales activas están dentro de SEÑALES_SOLO_SEGUIMIENTO,
-       PARCIAL_SEGUIMIENTO (basta con el Paso 9).
-    4. Cualquier otro caso, COMPLETA.
+    2. Si hay algún paso concreto (1,2,3,5,6,7) con trabajo detectado, o hay que
+       verificar Gmail para el Paso 4, es COMPLETA (aunque ahora Cowork puede
+       usar pasos_necesarios para leer solo esos pasos, no todos).
+    3. Si ninguna señal ni ningún paso está activo, NINGUNA.
+    4. Si las únicas señales activas están dentro de SEÑALES_SOLO_SEGUIMIENTO
+       (y no hay ningún paso 1-7 pendiente), PARCIAL_SEGUIMIENTO.
+    5. Cualquier otro caso, COMPLETA.
     """
     if lecturas_fallidas:
+        return "COMPLETA"
+    algun_paso_pendiente = any(pasos_necesarios.values())
+    if algun_paso_pendiente:
         return "COMPLETA"
     activas = {k for k, v in señales.items() if v}
     if not activas:
@@ -90,6 +127,10 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def now_dt():
+    return datetime.now(timezone.utc)
+
+
 def parse_iso(value):
     if not value:
         return None
@@ -103,6 +144,13 @@ def parse_iso(value):
         return dt
     except Exception:
         return None
+
+
+def es_true(value):
+    """Interpreta el mismo convenio de booleanos-como-texto que usan todos los
+    prompts del pipeline: la celda dice literalmente "TRUE" o "FALSE" (o queda
+    vacía, que se trata como FALSE)."""
+    return str(value or "").strip().upper() == "TRUE"
 
 
 class SheetReadError(Exception):
@@ -152,6 +200,148 @@ def read_config(sheets):
     return config
 
 
+def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, lecturas_fallidas):
+    """Calcula, de forma determinista y a partir del estado real en Sheets, qué
+    pasos concretos del pipeline (1,2,3,5,6,7) tienen trabajo pendiente ahora
+    mismo. Devuelve (pasos: dict[str,bool], detalle: dict[str,str]).
+
+    Pasos 4 y 8 NO se calculan aquí con certeza (ver docstring del módulo):
+    - Paso 4 (procesar_respuesta_revisor) depende de si un revisor ya respondió
+      un hilo de Gmail. Este script solo puede aproximar "hay un borrador de
+      aprobación esperando desde hace más de MIN_MINUTOS_ANTES_DE_VERIFICAR_GMAIL_PASO4
+      minutos" como pista de que merece la pena que Cowork compruebe Gmail — se
+      expone como pasos["4_verificar_gmail"], no como un "4" de trabajo confirmado.
+    - Paso 8 (gestión de errores) no tiene condición propia: solo se dispara
+      reactivamente cuando otro paso falla durante la propia pasada de Cowork.
+    """
+    pasos = {"1": False, "2": False, "3": False, "4_verificar_gmail": False, "5": False, "6": False, "7": False}
+    detalle = {}
+
+    # Lectura única y completa de SOLICITUDES, reutilizada por los pasos 2,3,5,6,7.
+    try:
+        solicitudes = rows_as_dicts(sheets, "SOLICITUDES")
+    except SheetReadError as exc:
+        print(str(exc), file=sys.stderr)
+        lecturas_fallidas.append("SOLICITUDES_FULL")
+        # Sin poder leer SOLICITUDES de verdad, no podemos afirmar nada sobre los
+        # pasos 2,3,5,6,7 con seguridad: los marcamos todos como pendientes para
+        # forzar la pasada completa, igual que ya hacen las demás señales.
+        for k in ("2", "3", "5", "6", "7"):
+            pasos[k] = True
+        detalle["SOLICITUDES_FULL"] = "no se pudo leer SOLICITUDES, se asumen todos los pasos pendientes por seguridad"
+        solicitudes = []
+
+    if solicitudes:
+        # --- Paso 2: análisis de documento pendiente ---
+        pendientes_paso2 = [r for r in solicitudes if es_true(r.get("received")) and not es_true(r.get("analyzed"))]
+        if pendientes_paso2:
+            pasos["2"] = True
+            detalle["2"] = f"{len(pendientes_paso2)} solicitud(es) con received=TRUE y analyzed=FALSE"
+
+        # --- Paso 3: solicitud de aprobación pendiente de crear ---
+        # Candidatas: ya analizadas, sin decisión todavía (ni aprobado, ni rechazado,
+        # ni cambios solicitados). De esas, solo cuenta como "pendiente de Paso 3" si
+        # todavía NO existe un borrador BORRADOR_PENDIENTE de tipo solicitud_aprobacion
+        # en SEGUIMIENTO_ENVIOS para su request_id (si ya existe, el Paso 3 ya se hizo;
+        # lo que falta es Paso 4, no Paso 3 otra vez).
+        ya_con_borrador = {
+            r.get("request_id")
+            for r in seguimiento_rows
+            if (r.get("tipo_email") or "").strip() == "solicitud_aprobacion"
+            and (r.get("estado_final") or "").strip() == "BORRADOR_PENDIENTE"
+        }
+        candidatas_paso3 = [
+            r for r in solicitudes
+            if es_true(r.get("analyzed"))
+            and not es_true(r.get("approved"))
+            and not es_true(r.get("rejected"))
+            and not es_true(r.get("changes_requested"))
+            and r.get("request_id") not in ya_con_borrador
+        ]
+        if candidatas_paso3:
+            pasos["3"] = True
+            detalle["3"] = f"{len(candidatas_paso3)} solicitud(es) analizada(s) sin decisión y sin borrador de aprobación todavía"
+
+        # --- Paso 5: publicar aprobado pendiente ---
+        pendientes_paso5 = [r for r in solicitudes if es_true(r.get("approved")) and not es_true(r.get("closed"))]
+        if pendientes_paso5:
+            pasos["5"] = True
+            detalle["5"] = f"{len(pendientes_paso5)} solicitud(es) aprobada(s) y no cerrada(s) todavía"
+
+        # --- Paso 6: libro de datos pendiente ---
+        pendientes_paso6 = [
+            r for r in solicitudes
+            if es_true(r.get("approved")) and not es_true(r.get("base_database_registered"))
+        ]
+        if pendientes_paso6:
+            pasos["6"] = True
+            detalle["6"] = f"{len(pendientes_paso6)} solicitud(es) aprobada(s) sin registrar todavía en el Libro de Datos"
+
+        # --- Paso 7: reconciliación/alertas — solo si algún recordatorio ya venció ---
+        ahora = now_dt()
+        vencidos = []
+        for r in solicitudes:
+            if es_true(r.get("approved")) and not es_true(r.get("closed")):
+                next_reminder = parse_iso(r.get("next_reminder_at"))
+                if next_reminder is None or next_reminder <= ahora:
+                    vencidos.append(r)
+        if vencidos:
+            pasos["7"] = True
+            detalle["7"] = f"{len(vencidos)} solicitud(es) aprobada(s)-no-cerrada(s) con recordatorio vencido o sin fijar"
+
+    # --- Paso 4 (proxy, no confirmable sin Gmail): borradores de aprobación
+    # esperando desde hace tiempo ---
+    ahora = now_dt()
+    esperando_revisor = []
+    for r in seguimiento_rows:
+        if (r.get("tipo_email") or "").strip() == "solicitud_aprobacion" and (r.get("estado_final") or "").strip() == "BORRADOR_PENDIENTE":
+            creado = parse_iso(r.get("fecha_borrador_creado"))
+            if creado is None or (ahora - creado) >= timedelta(minutes=MIN_MINUTOS_ANTES_DE_VERIFICAR_GMAIL_PASO4):
+                esperando_revisor.append(r)
+    if esperando_revisor:
+        pasos["4_verificar_gmail"] = True
+        detalle["4_verificar_gmail"] = (
+            f"{len(esperando_revisor)} borrador(es) de aprobación en BORRADOR_PENDIENTE desde hace más de "
+            f"{MIN_MINUTOS_ANTES_DE_VERIFICAR_GMAIL_PASO4} min — no se puede confirmar sin Gmail, Cowork debe comprobarlo"
+        )
+
+    # --- Paso 1: entradas nuevas del formulario sin ingerir en SOLICITUDES ---
+    try:
+        form_spreadsheet_id = config.get("FORM_RESPONSES_SPREADSHEET_ID")
+        form_sheet_name = config.get("FORM_RESPONSES_SHEET_NAME")
+        if form_spreadsheet_id and form_sheet_name:
+            resp = sheets.spreadsheets().values().get(
+                spreadsheetId=form_spreadsheet_id,
+                range=f"{form_sheet_name}!A2:A",
+            ).execute()
+            form_rows = resp.get("values", [])
+            total_form_rows = len(form_rows)
+            if total_form_rows:
+                # form_row en SOLICITUDES referencia el número de fila real del Forms
+                # (la fila 2 del Forms = form_row "2", etc.), tal como describe
+                # 01_forms_ingesta. Comparamos por conteo de filas ya conocidas.
+                form_rows_conocidos = {
+                    str(r.get("form_row")).strip()
+                    for r in solicitudes
+                    if str(r.get("form_row") or "").strip()
+                }
+                total_esperado = total_form_rows + 1  # +1 porque la fila 1 es cabecera
+                pendientes_paso1 = [
+                    str(i) for i in range(2, total_esperado + 1) if str(i) not in form_rows_conocidos
+                ]
+                if pendientes_paso1:
+                    pasos["1"] = True
+                    detalle["1"] = f"{len(pendientes_paso1)} fila(s) del formulario sin ingerir todavía en SOLICITUDES (form_row: {', '.join(pendientes_paso1[:10])}{'...' if len(pendientes_paso1) > 10 else ''})"
+    except Exception as exc:
+        print(f"Aviso: no se pudo calcular el Paso 1 de forma precisa: {exc}", file=sys.stderr)
+        # Best-effort, igual que la señal form_responses_novedad original: si falla,
+        # no forzamos el paso 1 a pendiente (evita falsos positivos por un fallo
+        # puntual de acceso a la hoja externa del formulario), pero sí queda
+        # registrado como aviso — no como lectura_fallida crítica.
+
+    return pasos, detalle
+
+
 def main():
     creds = get_credentials()
     sheets = build("sheets", "v4", credentials=creds)
@@ -170,6 +360,8 @@ def main():
         "checkpointUsado": checkpoint_raw or None,
         "señales": señales,
         "lecturas_fallidas": lecturas_fallidas,
+        "pasos_necesarios": {},
+        "pasos_detalle": {},
         "debe_ejecutar_pasada_completa": True,
         "nivel_pasada_recomendado": "COMPLETA",
         "motivo": "",
@@ -189,22 +381,13 @@ def main():
         write_and_push(result)
         return
 
-    # Regla general para las 4 señales "críticas" de abajo: si la lectura FALLA
+    # Regla general para las señales "críticas" de abajo: si la lectura FALLA
     # de verdad (no si la pestaña está simplemente vacía), no asumimos "no hay
     # nada pendiente" — asumimos lo contrario (fuerza pasada completa) y lo
     # registramos en lecturas_fallidas, para no convertir un error transitorio
     # de la API de Sheets en un falso "todo tranquilo".
 
     # --- Señal 1: COLA_PUBLICACION_TEMPORAL_PDF ---
-    # OJO: EMBEBIDO_CONFIRMADO se excluye a propósito. Una fila en ese estado
-    # ya tiene el trabajo de Cowork terminado (embebido en Notion verificado,
-    # el cierre del expediente NO depende de la limpieza de Drive). Lo único
-    # pendiente ahi es el propio GitHub Action reintentando mover la copia de
-    # staging a la papelera, algo que puede fallar indefinidamente por la
-    # politica de organizacion del Workspace (ver CONFIG.DRIVE_STAGING_CLEANUP_*)
-    # y que Cowork no necesita ni puede resolver. Si se incluyera aqui,
-    # cualquier fila asi dejaria debe_ejecutar_pasada_completa=true para
-    # siempre, anulando el proposito entero de este chequeo rapido.
     try:
         cola = rows_as_dicts(sheets, "COLA_PUBLICACION_TEMPORAL_PDF")
         cola_pendiente = any(
@@ -235,11 +418,12 @@ def main():
         motivos.append("hay preguntas sin responder en LOG_ENVIO_IA" if "LOG_ENVIO_IA" not in lecturas_fallidas else "no se pudo leer LOG_ENVIO_IA (se asume pendiente por seguridad)")
 
     # --- Señal 3: SEGUIMIENTO_ENVIOS ---
+    seguimiento_rows = []
     try:
-        seguimiento = rows_as_dicts(sheets, "SEGUIMIENTO_ENVIOS")
+        seguimiento_rows = rows_as_dicts(sheets, "SEGUIMIENTO_ENVIOS")
         seguimiento_pendiente = any(
             (row.get("estado_final") or "").strip() in ("BORRADOR_PENDIENTE", "DISCREPANCIA")
-            for row in seguimiento
+            for row in seguimiento_rows
         )
     except SheetReadError as exc:
         print(str(exc), file=sys.stderr)
@@ -249,7 +433,7 @@ def main():
     if seguimiento_pendiente:
         motivos.append("hay seguimiento de envíos pendiente en SEGUIMIENTO_ENVIOS" if "SEGUIMIENTO_ENVIOS" not in lecturas_fallidas else "no se pudo leer SEGUIMIENTO_ENVIOS (se asume pendiente por seguridad)")
 
-    # --- Señal 4: SOLICITUDES.updated_at ---
+    # --- Señal 4: SOLICITUDES.updated_at (lectura ligera, solo la columna) ---
     try:
         solicitudes_header = get_values(sheets, "SOLICITUDES!A1:ZZ1")
         solicitudes_novedad = False
@@ -310,14 +494,24 @@ def main():
     if notion_novedad:
         motivos.append("Notion tiene contenido más reciente que el checkpoint (lastContentChangeAt)")
 
-    debe_ejecutar = any(señales.values())
-    nivel = calcular_nivel_pasada(señales, lecturas_fallidas)
+    # --- Pasos concretos (1,2,3,5,6,7) + proxy de Paso 4, deterministas ---
+    pasos_necesarios, pasos_detalle = calcular_pasos_necesarios(
+        sheets, config, checkpoint_dt, seguimiento_rows, lecturas_fallidas
+    )
+    result["pasos_necesarios"] = pasos_necesarios
+    result["pasos_detalle"] = pasos_detalle
+
+    debe_ejecutar = any(señales.values()) or any(pasos_necesarios.values())
+    nivel = calcular_nivel_pasada(señales, lecturas_fallidas, pasos_necesarios)
     result["debe_ejecutar_pasada_completa"] = debe_ejecutar  # retrocompatibilidad / lectura humana
     result["nivel_pasada_recomendado"] = nivel
+
+    pasos_motivo = "; ".join(f"paso {k}: {v}" for k, v in pasos_detalle.items())
+    motivos_completo = "; ".join(motivos + ([pasos_motivo] if pasos_motivo else []))
     if nivel == "PARCIAL_SEGUIMIENTO":
         result["motivo"] = "solo seguimiento de envíos pendiente (" + "; ".join(motivos) + ") — basta con el Paso 9, no hace falta pasada completa"
     else:
-        result["motivo"] = "; ".join(motivos) if motivos else "sin novedades en ninguna señal comprobada"
+        result["motivo"] = motivos_completo if motivos_completo else "sin novedades en ninguna señal ni paso comprobado"
 
     write_and_push(result)
 
