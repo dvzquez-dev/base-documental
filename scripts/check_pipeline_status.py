@@ -14,9 +14,28 @@ Cowork pasa de hacer seis lecturas a hacer un solo fetch HTTP.
 Salida: data/pipeline_status.json (committeado y publicado por GitHub Pages
 en https://dvzquez-dev.github.io/base-documental/data/pipeline_status.json).
 
-Es de SOLO LECTURA sobre Sheets (scope spreadsheets.readonly) — no escribe
-nada en la Sheet de control. La única escritura que hace este workflow es el
-commit/push de data/pipeline_status.json a este mismo repo.
+CAMBIO 2026-07-10 (cuarta vuelta — diagnóstico corregido) — el fetch HTTP se
+MANTIENE como mecanismo principal (existe justo para que Cowork no tenga que
+gastar ejecución leyendo Sheets seis veces por ciclo; quitarlo sería resolver
+el síntoma equivocado). Lo que estaba mal no era "hacer un fetch", sino la URL
+que se fetcheaba: las vueltas anteriores de este diagnóstico culparon a un CDN
+externo (GitHub Pages / raw.githubusercontent.com / jsDelivr) de servir una
+respuesta atascada en la URL LITERAL sin parámetros. Diagnóstico más fino:
+fetchear la MISMA URL literal dos veces seguidas devolvió el mismo byte a byte
+exacto aunque el archivo real ya se había republicado (confirmado comparando
+con un fetch con parámetro, que sí traía contenido fresco en el mismo
+instante) — eso apunta a que el propio mecanismo de fetch cachea por URL
+exacta, no a un fallo de tres CDNs independientes coincidiendo exactamente
+igual. Cowork tiene bloqueado añadir parámetros de cache-busting él mismo,
+pero SÍ lee siempre el valor ACTUAL de CONFIG.QUICKCHECK_STATUS_URL en vez de
+uno fijo — así que ahora es este script (el publicador, no quien lee) quien
+reescribe esa celda con un parámetro de cache-busting nuevo en cada
+publicación (ver rotate_status_url). Cada fetch de Cowork usa entonces una URL
+literal genuinamente distinta a la de la ejecución anterior, sin que Cowork
+tenga que modificar nada por su cuenta. Como respaldo de auditoría adicional
+(no la fuente principal), el resultado también se escribe en la celda
+CONFIG.QUICKCHECK_RESULT_JSON vía la Sheets API (requiere scope de escritura,
+no solo spreadsheets.readonly).
 
 Limitación conocida y estructural, no una decisión de diseño: no puede
 comprobar Gmail (envíos reales de correo, ni si un revisor ya respondió a un
@@ -59,7 +78,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 SPREADSHEET_ID = "1EL5luWUYD5_3onxaDUSHmexzzQZEkPNLW1Y4QzzRg20"
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]  # CAMBIO 2026-07-10: antes .readonly; ahora necesita escritura para CONFIG.QUICKCHECK_RESULT_JSON (ver docstring del módulo)
 OUTPUT_PATH = "data/pipeline_status.json"
 META_JSON_PATH = "data/meta.json"  # generado por scripts/sync-notion.mjs en este mismo repo
 STALE_ACTION_MINUTES = 90  # CAMBIO 2026-07-10 (antes 20, luego 45): ver CONFIG.QUICKCHECK_STALENESS_THRESHOLD_MINUTES,
@@ -218,6 +237,115 @@ def read_config(sheets):
         if key:
             config[key] = value
     return config
+
+
+def upsert_config_value(sheets, key, value):
+    """Escribe o actualiza una fila key/value en la pestaña CONFIG (requiere el
+    scope de escritura de SCOPES, ver CAMBIO 2026-07-10 en el docstring del
+    módulo). Si la key ya existe, actualiza solo su celda 'value'. Si no
+    existe, añade una fila nueva al final. No asume posiciones fijas de
+    columna: las busca por cabecera ("key"/"value"), igual que rows_as_dicts."""
+    values = get_values(sheets, "CONFIG!A1:Z")
+    if not values:
+        raise SheetReadError("CONFIG está vacío, no se puede escribir el resultado del quickcheck")
+    header = [h.strip() for h in values[0]]
+    try:
+        key_col = header.index("key")
+    except ValueError:
+        key_col = 0
+    try:
+        value_col = header.index("value")
+    except ValueError:
+        value_col = 1
+
+    row_idx = None
+    for i, row in enumerate(values[1:], start=2):  # 1-based; la fila 1 es la cabecera
+        cell_key = row[key_col] if key_col < len(row) else ""
+        if str(cell_key).strip() == key:
+            row_idx = i
+            break
+
+    if row_idx is not None:
+        rng = f"CONFIG!{_col_letter(value_col)}{row_idx}"
+        sheets.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=rng,
+            valueInputOption="RAW",
+            body={"values": [[value]]},
+        ).execute()
+    else:
+        new_row = [""] * (max(key_col, value_col) + 1)
+        new_row[key_col] = key
+        new_row[value_col] = value
+        sheets.spreadsheets().values().append(
+            spreadsheetId=SPREADSHEET_ID,
+            range="CONFIG!A1",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [new_row]},
+        ).execute()
+
+
+def rotate_status_url(sheets, result):
+    """Reescribe CONFIG.QUICKCHECK_STATUS_URL con un parámetro de cache-busting
+    NUEVO en cada publicación, horneado por el propio publicador (no por quien
+    lee la URL).
+
+    CAMBIO 2026-07-10 (cuarta vuelta — diagnóstico corregido a petición de
+    Daniel): las vueltas anteriores culpaban a un CDN externo (GitHub Pages /
+    raw.githubusercontent.com / jsDelivr) de servir una respuesta atascada en
+    la URL literal. Diagnóstico más fino: fetchear la MISMA URL literal dos
+    veces seguidas, en la misma sesión interactiva, devolvió el mismo byte a
+    byte exacto aunque el archivo real en el servidor ya se había publicado de
+    nuevo (confirmado comparando con un fetch con parámetro, que sí devolvía
+    contenido distinto/más reciente en el mismo instante). Eso apunta a que el
+    propio mecanismo de fetch de Cowork cachea por URL exacta, no a un
+    problema de los tres servidores de contenido (que coincidan los tres en el
+    mismo comportamiento ya era la pista: no tiene sentido que tres CDNs
+    independientes fallen exactamente igual).
+
+    Cowork tiene bloqueado añadir parámetros de cache-busting él mismo (para
+    no ser manipulable por contenido no confiable que le pida modificar URLs),
+    pero SÍ lee siempre el valor ACTUAL de CONFIG.QUICKCHECK_STATUS_URL en vez
+    de un valor fijo. Por tanto, si el propio publicador (este script) cambia
+    el valor de esa celda en cada ejecución, cada fetch de Cowork usa una URL
+    literal genuinamente distinta a la de la ejecución anterior — nunca puede
+    coincidir con una entrada ya cacheada, sin que Cowork tenga que modificar
+    nada por su cuenta. Esto mantiene "el fetch" como mecanismo (a petición
+    explícita de Daniel), solo corrige por qué estaba trayendo el dato
+    equivocado."""
+    base = "https://dvzquez-dev.github.io/base-documental/data/pipeline_status.json"
+    token = result["checkedAt"].replace(":", "").replace("-", "").rstrip("Z")
+    nueva_url = f"{base}?v={token}"
+    try:
+        upsert_config_value(sheets, "QUICKCHECK_STATUS_URL", nueva_url)
+    except Exception as exc:
+        print(f"ERROR: no se pudo rotar CONFIG.QUICKCHECK_STATUS_URL: {exc}", file=sys.stderr)
+
+
+def publish_result(sheets, result):
+    """Publica el resultado por varios caminos: (1) commit/push de
+    data/pipeline_status.json a este repo (GitHub Pages) — sigue siendo LA
+    fuente que Cowork lee, vía fetch, como siempre; (2) CONFIG.QUICKCHECK_STATUS_URL
+    se reescribe con un parámetro de cache-busting nuevo cada vez (ver
+    rotate_status_url) para que ese fetch nunca devuelva una respuesta
+    cacheada de una ejecución anterior; (3) CONFIG.QUICKCHECK_RESULT_JSON se
+    mantiene también como respaldo de auditoría vía Sheets (no es la fuente
+    principal). Si (2) o (3) fallan (p.ej. el service account todavía no
+    tiene permiso de EDITOR en esta hoja, solo Lector), no lo ocultamos: se
+    deja constancia clara en stderr, pero (1) sigue publicándose igual para
+    no perder el histórico."""
+    compact = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+    try:
+        upsert_config_value(sheets, "QUICKCHECK_RESULT_JSON", compact)
+    except Exception as exc:
+        print(
+            f"ERROR: no se pudo escribir CONFIG.QUICKCHECK_RESULT_JSON (¿el service account "
+            f"tiene permiso de EDITOR en esta hoja, no solo lector?): {exc}",
+            file=sys.stderr,
+        )
+    write_and_push(result)
+    rotate_status_url(sheets, result)
 
 
 def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, lecturas_fallidas):
@@ -391,14 +519,14 @@ def main():
         result["debe_ejecutar_pasada_completa"] = False
         result["nivel_pasada_recomendado"] = "NINGUNA"
         result["motivo"] = "EMERGENCY_STOP activo en CONFIG: no se recalculan señales, Cowork debe detenerse en su propio Paso 0."
-        write_and_push(result)
+        publish_result(sheets, result)
         return
 
     if checkpoint_dt is None:
         result["debe_ejecutar_pasada_completa"] = True
         result["nivel_pasada_recomendado"] = "COMPLETA"
         result["motivo"] = "No hay CONFIG.LAST_CYCLE_CHECKPOINT_AT válido: se recomienda pasada completa por seguridad."
-        write_and_push(result)
+        publish_result(sheets, result)
         return
 
     # Regla general para las señales "críticas" de abajo: si la lectura FALLA
@@ -533,7 +661,7 @@ def main():
     else:
         result["motivo"] = motivos_completo if motivos_completo else "sin novedades en ninguna señal ni paso comprobado"
 
-    write_and_push(result)
+    publish_result(sheets, result)
 
 
 def _col_letter(idx):
