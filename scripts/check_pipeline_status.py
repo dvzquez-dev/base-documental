@@ -84,27 +84,47 @@ MIN_MINUTOS_ANTES_DE_VERIFICAR_GMAIL_PASO4 = 10
 SEÑALES_SOLO_SEGUIMIENTO = {"seguimiento_envios_pendiente", "log_envio_ia_pendiente"}
 
 
+PASOS_CORE = ("1", "2", "3", "5", "6", "7")  # pasos "de pipeline" de verdad; 4_verificar_gmail NO cuenta como core
+
+
 def calcular_nivel_pasada(señales, lecturas_fallidas, pasos_necesarios):
     """Devuelve 'NINGUNA', 'PARCIAL_SEGUIMIENTO' o 'COMPLETA'.
+
+    CAMBIO 2026-07-10 (segunda vuelta, a petición de Daniel): al principio,
+    cualquier pasos_necesarios activo (incluido "4_verificar_gmail") forzaba
+    COMPLETA. Eso era incoherente: "hay que comprobar si el revisor respondió
+    en Gmail" es trabajo de la MISMA naturaleza que el Paso 9 (verificación de
+    correo, sin tocar ningún paso de pipeline 1-8), no una razón real para
+    etiquetar el ciclo como "pasada completa". Ahora "4_verificar_gmail" por
+    sí solo NUNCA fuerza COMPLETA — solo lo hacen los pasos "core" de verdad
+    (1,2,3,5,6,7, ver PASOS_CORE arriba). Si el único trabajo pendiente es
+    4_verificar_gmail (con o sin señales de solo-seguimiento), el nivel sigue
+    siendo PARCIAL_SEGUIMIENTO, y Cowork sabe (por el propio JSON) que además
+    de Paso 9 debe leer 04_procesar_respuesta_revisor y comprobar Gmail para
+    el revisor. Sigue sin poder confirmarse aquí: eso requiere Gmail, que este
+    script no tiene.
 
     Reglas (en este orden):
     1. Si alguna lectura falló de verdad (no sabemos su valor real), nunca nos
        fiamos de un patrón que parezca "solo seguimiento" — forzamos COMPLETA.
-    2. Si hay algún paso concreto (1,2,3,5,6,7) con trabajo detectado, o hay que
-       verificar Gmail para el Paso 4, es COMPLETA (aunque ahora Cowork puede
-       usar pasos_necesarios para leer solo esos pasos, no todos).
-    3. Si ninguna señal ni ningún paso está activo, NINGUNA.
-    4. Si las únicas señales activas están dentro de SEÑALES_SOLO_SEGUIMIENTO
-       (y no hay ningún paso 1-7 pendiente), PARCIAL_SEGUIMIENTO.
-    5. Cualquier otro caso, COMPLETA.
+    2. Si hay algún paso CORE (1,2,3,5,6,7) con trabajo detectado, es COMPLETA
+       (Cowork usa pasos_necesarios para leer solo esos pasos, no todos).
+    3. Si no hay ningún paso core pendiente, y ninguna señal ni 4_verificar_gmail
+       están activos, NINGUNA.
+    4. Si no hay ningún paso core pendiente, y las únicas señales activas están
+       dentro de SEÑALES_SOLO_SEGUIMIENTO (4_verificar_gmail puede estar activo
+       o no, da igual), PARCIAL_SEGUIMIENTO.
+    5. Cualquier otro caso (alguna señal fuera de SEÑALES_SOLO_SEGUIMIENTO sin
+       paso core, p.ej. cola_publicacion_pdf_pendiente), COMPLETA.
     """
     if lecturas_fallidas:
         return "COMPLETA"
-    algun_paso_pendiente = any(pasos_necesarios.values())
-    if algun_paso_pendiente:
+    core_pendiente = any(pasos_necesarios.get(k) for k in PASOS_CORE)
+    if core_pendiente:
         return "COMPLETA"
     activas = {k for k, v in señales.items() if v}
-    if not activas:
+    verificar_gmail_paso4 = bool(pasos_necesarios.get("4_verificar_gmail"))
+    if not activas and not verificar_gmail_paso4:
         return "NINGUNA"
     if activas <= SEÑALES_SOLO_SEGUIMIENTO:
         return "PARCIAL_SEGUIMIENTO"
