@@ -81,6 +81,19 @@ SPREADSHEET_ID = "1EL5luWUYD5_3onxaDUSHmexzzQZEkPNLW1Y4QzzRg20"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]  # CAMBIO 2026-07-10: antes .readonly; ahora necesita escritura para CONFIG.QUICKCHECK_RESULT_JSON (ver docstring del módulo)
 OUTPUT_PATH = "data/pipeline_status.json"
 META_JSON_PATH = "data/meta.json"  # generado por scripts/sync-notion.mjs en este mismo repo
+
+# CAMBIO 2026-07-13 (a petición de Daniel, evidencia real en EVENTOS_LOG del 2026-07-13
+# 00:30-15:27: 8 de 11 ciclos salieron COMPLETA con "falso positivo confirmado" por Cowork
+# en el propio ciclo) — snapshot de la corrida anterior, usado por el FIX B de abajo para
+# saber si una fila "aprobada, no cerrada, con bloqueo estructural ya diagnosticado" cambió
+# de verdad desde la última vez, o si sigue exactamente igual (en cuyo caso no debe forzar
+# COMPLETA otra vez). Se commitea junto con OUTPUT_PATH en el mismo push.
+STATE_FILE = "data/quickcheck_last_seen.json"
+
+# Marcas de texto en SOLICITUDES.last_error que indican "esto ya está diagnosticado como
+# bloqueo estructural conocido" (p.ej. un DOCX de ~4.6MB que no se puede volver a subir con
+# las herramientas de Cowork) — no un fallo transitorio a reintentar. Usado por el FIX B.
+STRUCTURAL_BLOCK_MARKERS = ("PENDIENTE_MANUAL_CONFIRMADO", "MANUAL_INTERVENTION")
 STALE_ACTION_MINUTES = 90  # CAMBIO 2026-07-10 (antes 20, luego 45): ver CONFIG.QUICKCHECK_STALENESS_THRESHOLD_MINUTES,
 # que es el valor que Cowork usa de verdad (esta constante es solo documentación, mantenerla
 # sincronizada a mano). Se subió porque Cowork pasó de revisar cada hora a revisar cada 15 min:
@@ -190,6 +203,38 @@ def es_true(value):
     prompts del pipeline: la celda dice literalmente "TRUE" o "FALSE" (o queda
     vacía, que se trata como FALSE)."""
     return str(value or "").strip().upper() == "TRUE"
+
+
+def tiene_marca_bloqueo_estructural(last_error):
+    """FIX B (2026-07-13): True si last_error ya contiene una de las marcas de
+    diagnóstico conocido en STRUCTURAL_BLOCK_MARKERS (p.ej. un DOCX que no se
+    puede volver a subir por límite de tamaño). Usado para no forzar COMPLETA
+    otra vez en un expediente ya diagnosticado, mientras nada cambie de verdad."""
+    if not last_error:
+        return False
+    texto = str(last_error)
+    return any(marker in texto for marker in STRUCTURAL_BLOCK_MARKERS)
+
+
+def load_state():
+    """Carga el snapshot {request_id: updated_at} de la corrida anterior (FIX B).
+    Si el archivo no existe todavía (primera corrida) o está corrupto, devuelve
+    un dict vacío — en ese caso ninguna fila puede coincidir con "sin cambios",
+    así que el comportamiento por defecto es seguro (no se excluye nada por error)."""
+    if not os.path.exists(STATE_FILE):
+        return {}
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_state(state):
+    os.makedirs(os.path.dirname(STATE_FILE) or ".", exist_ok=True)
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, separators=(",", ":"))
 
 
 class SheetReadError(Exception):
@@ -348,10 +393,11 @@ def publish_result(sheets, result):
     rotate_status_url(sheets, result)
 
 
-def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, lecturas_fallidas):
+def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, lecturas_fallidas, previous_state):
     """Calcula, de forma determinista y a partir del estado real en Sheets, qué
     pasos concretos del pipeline (1,2,3,5,6,7) tienen trabajo pendiente ahora
-    mismo. Devuelve (pasos: dict[str,bool], detalle: dict[str,str]).
+    mismo. Devuelve (pasos: dict[str,bool], detalle: dict[str,str],
+    bloqueos_conocidos_sin_cambios: list[str], nuevo_estado: dict[str,str]).
 
     Pasos 4 y 8 NO se calculan aquí con certeza (ver docstring del módulo):
     - Paso 4 (procesar_respuesta_revisor) depende de si un revisor ya respondió
@@ -361,9 +407,32 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
       expone como pasos["4_verificar_gmail"], no como un "4" de trabajo confirmado.
     - Paso 8 (gestión de errores) no tiene condición propia: solo se dispara
       reactivamente cuando otro paso falla durante la propia pasada de Cowork.
+
+    CAMBIO 2026-07-13 (dos arreglos pedidos por Daniel, con evidencia real de
+    EVENTOS_LOG del 2026-07-13 00:30-15:27: 8 de 11 ciclos salieron COMPLETA con
+    "falso positivo confirmado" por el propio Cowork en el ciclo):
+
+    FIX A — Paso 2 contaba filas de prueba/duplicadas ya cerradas (closed=TRUE)
+    como "pendientes de analizar" para siempre, porque el criterio solo miraba
+    received/analyzed sin mirar closed. Una fila cerrada ya está resuelta por
+    definición, sin importar lo que diga analyzed. Ver el "and not es_true(closed)"
+    añadido más abajo.
+
+    FIX B — Paso 5/7 forzaban COMPLETA para siempre en expedientes ya diagnosticados
+    como bloqueados por un límite estructural (caso VAXBFDH/A7F4NFG/UAWUVW7: DOCX
+    de ~4.6MB que las herramientas de Cowork no pueden volver a subir). Ahora, si
+    una fila approved=TRUE/closed=FALSE tiene en last_error una marca de
+    STRUCTURAL_BLOCK_MARKERS Y su updated_at no cambió desde la corrida anterior
+    (comparado contra previous_state, ver load_state/save_state), no cuenta para
+    marcar el paso 5/7 como necesario ni para forzar COMPLETA — pero sí se reporta
+    en bloqueos_conocidos_sin_cambios para no perderla de vista. En cuanto
+    updated_at cambie (p.ej. porque el GitHub Action fix_docx_publication_date.py
+    lo resolvió), se re-evalúa desde cero automáticamente en la siguiente corrida.
     """
     pasos = {"1": False, "2": False, "3": False, "4_verificar_gmail": False, "5": False, "6": False, "7": False}
     detalle = {}
+    bloqueos_conocidos_sin_cambios = []
+    nuevo_estado = {}
 
     # Lectura única y completa de SOLICITUDES, reutilizada por los pasos 2,3,5,6,7.
     try:
@@ -380,11 +449,27 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
         solicitudes = []
 
     if solicitudes:
+        # Snapshot de esta corrida (todas las filas, no solo las aprobadas) para que la
+        # próxima corrida pueda comparar updated_at — FIX B.
+        nuevo_estado = {
+            r.get("request_id"): r.get("updated_at", "")
+            for r in solicitudes
+            if r.get("request_id")
+        }
+
         # --- Paso 2: análisis de documento pendiente ---
-        pendientes_paso2 = [r for r in solicitudes if es_true(r.get("received")) and not es_true(r.get("analyzed"))]
+        # FIX A (2026-07-13): se excluyen las filas ya cerradas (closed=TRUE). Antes,
+        # una fila de test o un duplicado ya resuelto pero con analyzed=FALSE contaba
+        # como pendiente para siempre (p.ej. FORM-TEST-ROW-2-IGNORED, o los duplicados
+        # SOL-DOC-20260703-130905-1RM72OTI / ...-115545-1IJZX9QI-ROW4). Una fila cerrada
+        # ya está resuelta por definición, sin importar analyzed.
+        pendientes_paso2 = [
+            r for r in solicitudes
+            if es_true(r.get("received")) and not es_true(r.get("analyzed")) and not es_true(r.get("closed"))
+        ]
         if pendientes_paso2:
             pasos["2"] = True
-            detalle["2"] = f"{len(pendientes_paso2)} solicitud(es) con received=TRUE y analyzed=FALSE"
+            detalle["2"] = f"{len(pendientes_paso2)} solicitud(es) con received=TRUE y analyzed=FALSE (excluyendo cerradas)"
 
         # --- Paso 3: solicitud de aprobación pendiente de crear ---
         # Candidatas: ya analizadas, sin decisión todavía (ni aprobado, ni rechazado,
@@ -410,13 +495,42 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
             pasos["3"] = True
             detalle["3"] = f"{len(candidatas_paso3)} solicitud(es) analizada(s) sin decisión y sin borrador de aprobación todavía"
 
-        # --- Paso 5: publicar aprobado pendiente ---
-        pendientes_paso5 = [r for r in solicitudes if es_true(r.get("approved")) and not es_true(r.get("closed"))]
-        if pendientes_paso5:
-            pasos["5"] = True
-            detalle["5"] = f"{len(pendientes_paso5)} solicitud(es) aprobada(s) y no cerrada(s) todavía"
+        # --- Paso 5 y 7: base común "aprobada y no cerrada" ---
+        # FIX B (2026-07-13): antes, CUALQUIER fila approved=TRUE/closed=FALSE bastaba
+        # para marcar el paso 5 (y, vía el mismo conjunto, el paso 7) como pendiente,
+        # forzando COMPLETA ciclo tras ciclo aunque el expediente llevara horas/días
+        # exactamente igual (caso VAXBFDH/A7F4NFG/UAWUVW7: DOCX ~4.6MB que las
+        # herramientas de Cowork no pueden volver a subir, diagnóstico ya conocido y
+        # escrito en last_error). Ahora se separan en dos grupos:
+        #   - aprobadas_no_cerradas_nuevas: SÍ cuentan para paso 5/7 y para forzar COMPLETA.
+        #   - bloqueos_conocidos_sin_cambios: tienen una marca de STRUCTURAL_BLOCK_MARKERS
+        #     en last_error Y su updated_at es idéntico al de la corrida anterior (según
+        #     previous_state) — no cuentan para nada de lo anterior, pero se reportan
+        #     aparte para que no se pierdan de vista. En cuanto updated_at cambie de
+        #     verdad (p.ej. lo resuelve fix_docx_publication_date.py), vuelven a
+        #     evaluarse desde cero en la siguiente corrida.
+        aprobadas_no_cerradas = [r for r in solicitudes if es_true(r.get("approved")) and not es_true(r.get("closed"))]
+        aprobadas_no_cerradas_nuevas = []
+        for r in aprobadas_no_cerradas:
+            request_id = r.get("request_id")
+            last_error = r.get("last_error", "")
+            updated_at = r.get("updated_at", "")
+            if tiene_marca_bloqueo_estructural(last_error) and previous_state.get(request_id) == updated_at and updated_at:
+                bloqueos_conocidos_sin_cambios.append(request_id)
+            else:
+                aprobadas_no_cerradas_nuevas.append(r)
 
-        # --- Paso 6: libro de datos pendiente ---
+        # --- Paso 5: publicar aprobado pendiente ---
+        if aprobadas_no_cerradas_nuevas:
+            pasos["5"] = True
+            detalle["5"] = (
+                f"{len(aprobadas_no_cerradas_nuevas)} solicitud(es) aprobada(s) y no cerrada(s) todavía "
+                f"(nuevas; excluye {len(bloqueos_conocidos_sin_cambios)} bloqueo(s) estructural(es) ya conocido(s) sin cambios)"
+                if bloqueos_conocidos_sin_cambios
+                else f"{len(aprobadas_no_cerradas_nuevas)} solicitud(es) aprobada(s) y no cerrada(s) todavía"
+            )
+
+        # --- Paso 6: libro de datos pendiente (SIN TOCAR — lógica intacta a petición de Daniel) ---
         pendientes_paso6 = [
             r for r in solicitudes
             if es_true(r.get("approved")) and not es_true(r.get("base_database_registered"))
@@ -426,13 +540,14 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
             detalle["6"] = f"{len(pendientes_paso6)} solicitud(es) aprobada(s) sin registrar todavía en el Libro de Datos"
 
         # --- Paso 7: reconciliación/alertas — solo si algún recordatorio ya venció ---
+        # FIX B aplicado también aquí: itera solo sobre aprobadas_no_cerradas_nuevas,
+        # no sobre todas las aprobadas-no-cerradas (mismo motivo que Paso 5 arriba).
         ahora = now_dt()
         vencidos = []
-        for r in solicitudes:
-            if es_true(r.get("approved")) and not es_true(r.get("closed")):
-                next_reminder = parse_iso(r.get("next_reminder_at"))
-                if next_reminder is None or next_reminder <= ahora:
-                    vencidos.append(r)
+        for r in aprobadas_no_cerradas_nuevas:
+            next_reminder = parse_iso(r.get("next_reminder_at"))
+            if next_reminder is None or next_reminder <= ahora:
+                vencidos.append(r)
         if vencidos:
             pasos["7"] = True
             detalle["7"] = f"{len(vencidos)} solicitud(es) aprobada(s)-no-cerrada(s) con recordatorio vencido o sin fijar"
@@ -487,7 +602,7 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
         # puntual de acceso a la hoja externa del formulario), pero sí queda
         # registrado como aviso — no como lectura_fallida crítica.
 
-    return pasos, detalle
+    return pasos, detalle, bloqueos_conocidos_sin_cambios, nuevo_estado
 
 
 def main():
@@ -510,6 +625,7 @@ def main():
         "lecturas_fallidas": lecturas_fallidas,
         "pasos_necesarios": {},
         "pasos_detalle": {},
+        "bloqueos_conocidos_sin_cambios": [],
         "debe_ejecutar_pasada_completa": True,
         "nivel_pasada_recomendado": "COMPLETA",
         "motivo": "",
@@ -643,11 +759,18 @@ def main():
         motivos.append("Notion tiene contenido más reciente que el checkpoint (lastContentChangeAt)")
 
     # --- Pasos concretos (1,2,3,5,6,7) + proxy de Paso 4, deterministas ---
-    pasos_necesarios, pasos_detalle = calcular_pasos_necesarios(
-        sheets, config, checkpoint_dt, seguimiento_rows, lecturas_fallidas
+    # FIX B (2026-07-13): previous_state es el snapshot {request_id: updated_at} de la
+    # corrida anterior (ver STATE_FILE) — permite distinguir un bloqueo estructural ya
+    # diagnosticado que sigue exactamente igual, de un cambio real que sí debe re-evaluarse.
+    previous_state = load_state()
+    pasos_necesarios, pasos_detalle, bloqueos_conocidos_sin_cambios, nuevo_estado = calcular_pasos_necesarios(
+        sheets, config, checkpoint_dt, seguimiento_rows, lecturas_fallidas, previous_state
     )
     result["pasos_necesarios"] = pasos_necesarios
     result["pasos_detalle"] = pasos_detalle
+    result["bloqueos_conocidos_sin_cambios"] = bloqueos_conocidos_sin_cambios
+    if nuevo_estado:
+        save_state(nuevo_estado)
 
     debe_ejecutar = any(señales.values()) or any(pasos_necesarios.values())
     nivel = calcular_nivel_pasada(señales, lecturas_fallidas, pasos_necesarios)
@@ -655,7 +778,13 @@ def main():
     result["nivel_pasada_recomendado"] = nivel
 
     pasos_motivo = "; ".join(f"paso {k}: {v}" for k, v in pasos_detalle.items())
-    motivos_completo = "; ".join(motivos + ([pasos_motivo] if pasos_motivo else []))
+    extra_motivos = [pasos_motivo] if pasos_motivo else []
+    if bloqueos_conocidos_sin_cambios:
+        extra_motivos.append(
+            "bloqueos estructurales ya conocidos, sin cambios desde la corrida anterior "
+            "(no fuerzan pasada completa): " + ", ".join(bloqueos_conocidos_sin_cambios)
+        )
+    motivos_completo = "; ".join(motivos + extra_motivos)
     if nivel == "PARCIAL_SEGUIMIENTO":
         result["motivo"] = "solo seguimiento de envíos pendiente (" + "; ".join(motivos) + ") — basta con el Paso 9, no hace falta pasada completa"
     else:
@@ -692,7 +821,13 @@ def git_commit_and_push_with_retry(max_attempts=5):
     git("config", "user.name", "solaris-status-bot")
     git("config", "user.email", "actions@users.noreply.github.com")
     git("checkout", "-B", "main")
-    git("add", OUTPUT_PATH)
+    # CAMBIO 2026-07-13: también se commitea STATE_FILE (snapshot para el FIX B de
+    # calcular_pasos_necesarios) si existe — "git add" con un path que no existe fallaría,
+    # pero para cuando llegamos aquí siempre se ha llamado a save_state() antes.
+    add_args = [OUTPUT_PATH]
+    if os.path.exists(STATE_FILE):
+        add_args.append(STATE_FILE)
+    git("add", *add_args)
     commit_result = git("commit", "-m", "Actualizar pipeline_status.json", check=False)
     if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stdout:
         raise RuntimeError(f"git commit fallo: {commit_result.stderr.strip()}")
