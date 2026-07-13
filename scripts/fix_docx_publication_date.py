@@ -198,10 +198,21 @@ def actualizar_last_error_y_updated_at(sheets, header, row_number, nuevo_last_er
 
 # --------------------------------------------------------------------------------------
 # Drive — descarga, parcheo del DOCX, conversión a PDF, subida.
+#
+# IMPORTANTE (2026-07-13, tras varias ejecuciones reales fallando con 404 solo en
+# escritura pese a que la lectura funcionaba y el rol ya era Gestor de contenido):
+# todo el contenido de este pipeline vive dentro de una Unidad Compartida de Drive.
+# La API de Drive v3 exige el parámetro supportsAllDrives=True en CUALQUIER llamada
+# que toque contenido de una Unidad Compartida para operaciones de escritura
+# (update/create) — sin él, la API devuelve 404 "File not found" en vez de un error
+# más claro, incluso con permisos correctos. Las lecturas (get_media) toleraban su
+# ausencia en las pruebas reales, pero se añade también por consistencia y para
+# evitar el mismo problema si algún día se lee un archivo directamente dentro de la
+# Unidad Compartida sin pasar por una carpeta ya visitada.
 # --------------------------------------------------------------------------------------
 
 def download_file(drive, file_id):
-    request = drive.files().get_media(fileId=file_id)
+    request = drive.files().get_media(fileId=file_id, supportsAllDrives=True)
     buf = io.BytesIO()
     downloader = MediaIoBaseDownload(buf, request)
     done = False
@@ -260,13 +271,13 @@ def update_drive_file_content(drive, file_id, new_bytes, mime_type):
     """Sube new_bytes AL MISMO fileId (files().update) — nunca crea un archivo nuevo,
     conserva enlace y permisos existentes."""
     media = MediaIoBaseUpload(io.BytesIO(new_bytes), mimetype=mime_type, resumable=True)
-    drive.files().update(fileId=file_id, media_body=media).execute()
+    drive.files().update(fileId=file_id, media_body=media, supportsAllDrives=True).execute()
 
 
 def upload_new_file(drive, parent_id, filename, content_bytes, mime_type):
     file_metadata = {"name": filename, "parents": [parent_id]}
     media = MediaIoBaseUpload(io.BytesIO(content_bytes), mimetype=mime_type, resumable=True)
-    created = drive.files().create(body=file_metadata, media_body=media, fields="id").execute()
+    created = drive.files().create(body=file_metadata, media_body=media, fields="id", supportsAllDrives=True).execute()
     return created["id"]
 
 
