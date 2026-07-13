@@ -23,6 +23,19 @@ las mismas que usa el FIX B de check_pipeline_status.py):
   2. Reemplaza "Fecha de publicación: --/--/----" por la fecha de hoy (DD/MM/AAAA,
      huso horario Europe/Madrid) en el footer correspondiente, editando directamente
      el XML dentro del .docx (zip), sin tocar nada más del documento.
+  2b. AÑADIDO 2026-07-13 (pedido explícito de Daniel): además, busca en las cabeceras
+     y pies de página (word/header*.xml, word/footer*.xml) cualquier texto con forma
+     de referencia documental (patrón tipo "Informe_S-6009_26": palabra + "_S-" +
+     dígitos + "_" + dígitos) que NO coincida con la reference realmente reservada
+     para este expediente (columna reference de SOLICITUDES), y lo sustituye por la
+     correcta. Esto cubre el caso de documentos reentregados/copiados de una plantilla
+     u otro expediente que conservan en la cabecera una referencia antigua o de
+     ejemplo. Es una detección por PATRÓN (regex), no una lista cerrada de valores
+     conocidos — puede no encontrar nada si la cabecera no sigue ese formato exacto
+     (mismo tipo de limitación que el placeholder de fecha: no falla, simplemente no
+     encuentra nada que corregir), y en textos partidos por Word en varias runs de
+     XML tras ediciones manuales previas tampoco lo detectará (limitación conocida y
+     aceptada, igual que con la fecha).
   3. Sube el contenido corregido de vuelta AL MISMO fileId (files().update con
      media_body) — mismo enlace y permisos, no crea un archivo nuevo.
   4. Convierte el DOCX corregido a PDF con LibreOffice headless (instalado en el
@@ -89,6 +102,12 @@ STRUCTURAL_BLOCK_MARKERS = ("PENDIENTE_MANUAL_CONFIRMADO", "MANUAL_INTERVENTION"
 PLACEHOLDER = "Fecha de publicación: --/--/----"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 PDF_MIME = "application/pdf"
+
+# AÑADIDO 2026-07-13 (pedido explícito de Daniel): patrón para detectar una referencia
+# documental con forma "Palabra_S-NNNN_NN" (p.ej. "Informe_S-6009_26") dentro de
+# cabeceras/pies, para poder sustituirla por la reference real reservada cuando el
+# documento llega con una referencia antigua/de plantilla copiada de otro expediente.
+REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-\d{3,5}_\d{2}")
 
 SOLICITUDES_SHEET = "SOLICITUDES"
 
@@ -248,6 +267,42 @@ def patch_docx_publication_date(docx_bytes, new_date):
     return out_buf.getvalue(), changed
 
 
+def patch_docx_reference(docx_bytes, correct_reference):
+    """AÑADIDO 2026-07-13. Busca en CUALQUIER header*.xml/footer*.xml del documento
+    texto con forma de referencia documental (REFERENCE_PATTERN) que no coincida con
+    correct_reference, y lo sustituye. Devuelve (nuevo_docx_bytes, cambiado,
+    referencias_incorrectas_encontradas). No toca el cuerpo del documento ni ningún
+    otro contenido. Detección por patrón, no por lista cerrada: si la cabecera no
+    sigue ese formato exacto, o el texto está partido en varias runs de XML por
+    ediciones previas de Word, simplemente no encontrará nada que corregir (mismo
+    tipo de limitación ya conocida y aceptada para el placeholder de fecha)."""
+    zin = zipfile.ZipFile(io.BytesIO(docx_bytes), "r")
+    changed = False
+    encontradas = set()
+    out_buf = io.BytesIO()
+
+    def _reemplazar(match):
+        nonlocal changed
+        texto_encontrado = match.group(0)
+        if texto_encontrado == correct_reference:
+            return texto_encontrado
+        encontradas.add(texto_encontrado)
+        changed = True
+        return correct_reference
+
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if re.match(r"word/(header|footer)\d*\.xml$", item.filename):
+                text = data.decode("utf-8")
+                new_text = REFERENCE_PATTERN.sub(_reemplazar, text)
+                if new_text != text:
+                    data = new_text.encode("utf-8")
+            zout.writestr(item, data)
+
+    return out_buf.getvalue(), changed, sorted(encontradas)
+
+
 def convert_docx_to_pdf(docx_bytes, workdir):
     docx_path = os.path.join(workdir, "input.docx")
     with open(docx_path, "wb") as f:
@@ -328,7 +383,17 @@ def main():
             original_bytes = download_file(drive, docx_file_id)
 
             fecha_hoy = today_es()
-            new_bytes, changed = patch_docx_publication_date(original_bytes, fecha_hoy)
+            fecha_bytes, changed_fecha = patch_docx_publication_date(original_bytes, fecha_hoy)
+
+            # AÑADIDO 2026-07-13 (pedido explícito de Daniel): además de la fecha,
+            # corrige también cualquier referencia documental equivocada en cabecera/
+            # pie (p.ej. un DOCX reentregado que conserva la referencia de una
+            # plantilla u otro expediente en vez de la reservada de verdad). Se aplica
+            # sobre el resultado del parcheo de fecha (encadenado, no en paralelo)
+            # para que ambas correcciones convivan en el mismo DOCX final.
+            ref_bytes, changed_ref, referencias_incorrectas = patch_docx_reference(fecha_bytes, reference)
+            new_bytes = ref_bytes
+            changed = changed_fecha or changed_ref
 
             # IMPORTANTE (corregido 2026-07-13, tras primeras ejecuciones reales en Actions):
             # NO saltar el expediente solo porque este DOCX en concreto no tenga el
@@ -338,16 +403,26 @@ def main():
             # subir el PDF por límite de tamaño de sus propias herramientas) — y ESO sí lo
             # puede resolver este Action sin depender de que exista el placeholder. Por eso
             # siempre se continúa hasta generar y subir el PDF; solo se sube el DOCX de
-            # vuelta si de verdad se modificó algo.
+            # vuelta si de verdad se modificó algo (fecha y/o referencia).
+            notas_parciales = []
+            if changed_fecha:
+                notas_parciales.append(f"fecha de publicacion corregida ({fecha_hoy})")
+            else:
+                notas_parciales.append("sin campo de fecha de publicacion que corregir")
+            if changed_ref:
+                notas_parciales.append(
+                    f"referencia corregida en cabecera/pie ({', '.join(referencias_incorrectas)} -> {reference})"
+                )
+
             if changed:
                 print(f"[{request_id}] subiendo DOCX corregido al mismo fileId ({docx_file_id}) ...")
                 update_drive_file_content(drive, docx_file_id, new_bytes, DOCX_MIME)
                 docx_bytes_for_pdf = new_bytes
-                fecha_nota = f"fecha de publicacion corregida ({fecha_hoy}), DOCX actualizado en el mismo fileId ({docx_file_id}), "
+                fecha_nota = ", ".join(notas_parciales) + f", DOCX actualizado en el mismo fileId ({docx_file_id}), "
             else:
-                print(f"[{request_id}] placeholder de fecha no encontrado en este DOCX (plantilla sin ese campo, o ya corregido a mano) — no se resube el DOCX, se continua igualmente con la generacion del PDF.")
+                print(f"[{request_id}] ni placeholder de fecha ni referencia incorrecta encontrados en este DOCX — no se resube el DOCX, se continua igualmente con la generacion del PDF.")
                 docx_bytes_for_pdf = original_bytes
-                fecha_nota = "sin campo de fecha de publicacion que corregir en este DOCX, "
+                fecha_nota = "sin campo de fecha de publicacion ni referencia que corregir en este DOCX, "
 
             with tempfile.TemporaryDirectory() as workdir:
                 print(f"[{request_id}] convirtiendo a PDF con LibreOffice ...")
