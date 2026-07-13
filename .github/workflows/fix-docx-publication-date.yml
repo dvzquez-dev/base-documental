@@ -1,0 +1,53 @@
+name: Fix DOCX publication date (bloqueos estructurales conocidos)
+
+# Por qué existe: Cowork no puede re-subir DOCX grandes (~4.6MB) por el límite de
+# tamaño de mensaje de sus herramientas de Drive (probado exhaustivamente: conector
+# nativo, Pipedream, conversión server-side, túnel propio). Este Action sí puede,
+# porque corre con internet sin restricciones y la misma service account con permiso
+# de Editor. Corrige la fecha de publicación en el DOCX, genera el PDF y actualiza
+# SOLICITUDES para que el pipeline normal (check_pipeline_status.py + el ciclo
+# horario de Cowork) recoja el resultado en la siguiente pasada.
+
+on:
+  # Ejecutar manualmente cuando se sabe que hay un expediente recién desbloqueado
+  # (p.ej. tras subir a mano un DOCX corregido de tamaño más manejable), y también
+  # de forma programada para no depender de acordarse de lanzarlo a mano.
+  workflow_dispatch: {}
+  schedule:
+    - cron: "15 */6 * * *"  # cada 6 horas, desfasado del cron de check_pipeline_status.py
+
+permissions:
+  contents: write
+
+jobs:
+  fix-docx-publication-date:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar LibreOffice (conversión DOCX -> PDF headless)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libreoffice
+
+      - name: Instalar dependencias Python
+        run: |
+          pip install --upgrade pip
+          pip install google-api-python-client google-auth
+          # Nota: no se instala gspread ni python-docx. El script usa la misma API
+          # cruda de Sheets (googleapiclient) que ya usa check_pipeline_status.py, y
+          # edita el DOCX directamente como zip/XML (igual que la función
+          # patch_docx_publication_date ya verificada a mano contra VAXBFDH), sin
+          # pasar por python-docx. Menos dependencias, mismo patrón en todo el repo.
+
+      - name: Corregir fecha de publicación y generar PDF
+        env:
+          GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+        run: python3 scripts/fix_docx_publication_date.py
