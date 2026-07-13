@@ -318,16 +318,29 @@ def main():
 
             fecha_hoy = today_es()
             new_bytes, changed = patch_docx_publication_date(original_bytes, fecha_hoy)
-            if not changed:
-                skipped.append((request_id, "placeholder de fecha no encontrado en ningún footer (¿ya corregido a mano?)"))
-                continue
 
-            print(f"[{request_id}] subiendo DOCX corregido al mismo fileId ({docx_file_id}) ...")
-            update_drive_file_content(drive, docx_file_id, new_bytes, DOCX_MIME)
+            # IMPORTANTE (corregido 2026-07-13, tras primeras ejecuciones reales en Actions):
+            # NO saltar el expediente solo porque este DOCX en concreto no tenga el
+            # placeholder de fecha (algunas plantillas, p.ej. Informes de Subsistema, no
+            # tienen ese campo en absoluto). El bloqueo real que motivó marcar la fila con
+            # una marca estructural puede ser otra cosa (p.ej. que Cowork no pudo generar/
+            # subir el PDF por límite de tamaño de sus propias herramientas) — y ESO sí lo
+            # puede resolver este Action sin depender de que exista el placeholder. Por eso
+            # siempre se continúa hasta generar y subir el PDF; solo se sube el DOCX de
+            # vuelta si de verdad se modificó algo.
+            if changed:
+                print(f"[{request_id}] subiendo DOCX corregido al mismo fileId ({docx_file_id}) ...")
+                update_drive_file_content(drive, docx_file_id, new_bytes, DOCX_MIME)
+                docx_bytes_for_pdf = new_bytes
+                fecha_nota = f"fecha de publicacion corregida ({fecha_hoy}), DOCX actualizado en el mismo fileId ({docx_file_id}), "
+            else:
+                print(f"[{request_id}] placeholder de fecha no encontrado en este DOCX (plantilla sin ese campo, o ya corregido a mano) — no se resube el DOCX, se continua igualmente con la generacion del PDF.")
+                docx_bytes_for_pdf = original_bytes
+                fecha_nota = "sin campo de fecha de publicacion que corregir en este DOCX, "
 
             with tempfile.TemporaryDirectory() as workdir:
                 print(f"[{request_id}] convirtiendo a PDF con LibreOffice ...")
-                pdf_bytes = convert_docx_to_pdf(new_bytes, workdir)
+                pdf_bytes = convert_docx_to_pdf(docx_bytes_for_pdf, workdir)
 
             pdf_filename = f"{reference}.pdf"
             print(f"[{request_id}] subiendo PDF nuevo a la carpeta del expediente ({folder_id}) ...")
@@ -335,8 +348,7 @@ def main():
 
             resolved_note = (
                 f"RESUELTO_AUTOMATICO_{now_iso()}_via_github_action_fix_docx_publication_date: "
-                f"fecha de publicacion corregida ({fecha_hoy}), DOCX actualizado en el mismo "
-                f"fileId ({docx_file_id}), PDF generado y subido (fileId {pdf_file_id})."
+                f"{fecha_nota}PDF generado y subido (fileId {pdf_file_id})."
             )
             actualizar_last_error_y_updated_at(sheets, header, row["_row_number"], resolved_note, now_iso())
 
