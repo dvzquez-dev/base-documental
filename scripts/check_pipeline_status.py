@@ -165,7 +165,12 @@ def calcular_nivel_pasada(señales, lecturas_fallidas, pasos_necesarios):
         return "COMPLETA"
     activas = {k for k, v in señales.items() if v}
     verificar_gmail_paso4 = bool(pasos_necesarios.get("4_verificar_gmail"))
-    if not activas and not verificar_gmail_paso4:
+    # AÑADIDO 2026-07-14: revisor_field_diagnostico se trata igual que
+    # 4_verificar_gmail — es trabajo real pero barato (abrir un documento y anotar un
+    # formato, no ejecutar el pipeline), así que por sí solo nunca fuerza COMPLETA,
+    # pero tampoco debe perderse silenciosamente en NINGUNA.
+    revisor_field_diagnostico = bool(pasos_necesarios.get("revisor_field_diagnostico"))
+    if not activas and not verificar_gmail_paso4 and not revisor_field_diagnostico:
         return "NINGUNA"
     if activas <= SEÑALES_SOLO_SEGUIMIENTO:
         return "PARCIAL_SEGUIMIENTO"
@@ -438,7 +443,10 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
     updated_at cambie (p.ej. porque el GitHub Action fix_docx_publication_date.py
     lo resolvió), se re-evalúa desde cero automáticamente en la siguiente corrida.
     """
-    pasos = {"1": False, "2": False, "3": False, "4_verificar_gmail": False, "5": False, "6": False, "7": False}
+    pasos = {
+        "1": False, "2": False, "3": False, "4_verificar_gmail": False,
+        "5": False, "6": False, "7": False, "revisor_field_diagnostico": False,
+    }
     detalle = {}
     bloqueos_conocidos_sin_cambios = []
     nuevo_estado = {}
@@ -556,6 +564,26 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
                 f"(nuevas; excluye {len(bloqueos_conocidos_sin_cambios)} bloqueo(s) estructural(es) ya conocido(s) sin cambios)"
                 if bloqueos_conocidos_sin_cambios
                 else f"{len(aprobadas_no_cerradas_nuevas)} solicitud(es) aprobada(s) y no cerrada(s) todavía"
+            )
+
+        # --- revisor_field_diagnostico (AÑADIDO 2026-07-14, pedido explícito de Daniel):
+        # filas donde fix_docx_publication_date.py escaló porque ningún patrón conocido
+        # de CONFIG.REVISOR_FIELD_KNOWN_PATTERNS encontró el campo "Revisor/es" en el
+        # footer del DOCX. NO es un paso "core" (no fuerza COMPLETA por sí solo — ver
+        # calcular_nivel_pasada, tratado igual que 4_verificar_gmail): es barato, Cowork
+        # solo tiene que abrir el documento con read_file_content y anotar el formato
+        # real observado en revisor_field_patron_sugerido, no ejecutar el pipeline.
+        pendientes_revisor_field_diagnostico = [
+            r for r in solicitudes
+            if es_true(r.get("revisor_field_diagnostico_pendiente")) and not es_true(r.get("closed"))
+        ]
+        if pendientes_revisor_field_diagnostico:
+            pasos["revisor_field_diagnostico"] = True
+            detalle["revisor_field_diagnostico"] = (
+                f"{len(pendientes_revisor_field_diagnostico)} solicitud(es) con el campo Revisor/es "
+                f"sin patrón conocido — pendiente de que Cowork diagnostique el formato real "
+                f"(request_id: {', '.join(r.get('request_id', '?') for r in pendientes_revisor_field_diagnostico[:5])}"
+                f"{'...' if len(pendientes_revisor_field_diagnostico) > 5 else ''})"
             )
 
         # --- Paso 6: libro de datos pendiente (SIN TOCAR — lógica intacta a petición de Daniel) ---
