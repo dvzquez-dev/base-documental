@@ -93,7 +93,16 @@ STATE_FILE = "data/quickcheck_last_seen.json"
 # Marcas de texto en SOLICITUDES.last_error que indican "esto ya está diagnosticado como
 # bloqueo estructural conocido" (p.ej. un DOCX de ~4.6MB que no se puede volver a subir con
 # las herramientas de Cowork) — no un fallo transitorio a reintentar. Usado por el FIX B.
-STRUCTURAL_BLOCK_MARKERS = ("PENDIENTE_MANUAL_CONFIRMADO", "MANUAL_INTERVENTION")
+#
+# CAMBIO 2026-07-14 (bug real confirmado con evidencia — Daniel reportó pasadas COMPLETA
+# repetidas sin motivo real): UAWUVW7 llevaba varios ciclos seguidos forzando COMPLETA
+# porque su last_error real en Sheets empieza por "BLOQUEO_PDF_..." — una marca que Cowork
+# usa de verdad en la práctica pero que NO estaba en esta tupla. tiene_marca_bloqueo_estructural()
+# nunca la reconocía, así que el FIX B (bloqueos_conocidos_sin_cambios) jamás se activaba
+# para esa fila, por más que el updated_at llevara horas sin cambiar. Se añade "BLOQUEO_PDF"
+# como marca reconocida. Si en el futuro aparece otra variante de texto usada de verdad en
+# last_error para el mismo tipo de bloqueo estructural, añadirla aquí también.
+STRUCTURAL_BLOCK_MARKERS = ("PENDIENTE_MANUAL_CONFIRMADO", "MANUAL_INTERVENTION", "BLOQUEO_PDF")
 STALE_ACTION_MINUTES = 90  # CAMBIO 2026-07-10 (antes 20, luego 45): ver CONFIG.QUICKCHECK_STALENESS_THRESHOLD_MINUTES,
 # que es el valor que Cowork usa de verdad (esta constante es solo documentación, mantenerla
 # sincronizada a mano). Se subió porque Cowork pasó de revisar cada hora a revisar cada 15 min:
@@ -473,15 +482,33 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
 
         # --- Paso 3: solicitud de aprobación pendiente de crear ---
         # Candidatas: ya analizadas, sin decisión todavía (ni aprobado, ni rechazado,
-        # ni cambios solicitados). De esas, solo cuenta como "pendiente de Paso 3" si
-        # todavía NO existe un borrador BORRADOR_PENDIENTE de tipo solicitud_aprobacion
+        # ni cambios solicitados), y no cerradas. De esas, solo cuenta como "pendiente
+        # de Paso 3" si todavía NO existe NINGÚN registro de tipo solicitud_aprobacion
         # en SEGUIMIENTO_ENVIOS para su request_id (si ya existe, el Paso 3 ya se hizo;
-        # lo que falta es Paso 4, no Paso 3 otra vez).
-        ya_con_borrador = {
+        # lo que falta como mucho es Paso 4 — verificar la respuesta del revisor —, no
+        # Paso 3 otra vez).
+        #
+        # CAMBIO 2026-07-14 (dos bugs reales confirmados con evidencia — Daniel reportó
+        # pasadas COMPLETA repetidas con falsos positivos confirmados por Cowork en el
+        # propio ciclo, dos ciclos seguidos):
+        #
+        # FIX C.1 — faltaba "and not es_true(r.get('closed'))" aquí, a diferencia del
+        # Paso 2 (que sí lo tiene desde el FIX A). Una fila cerrada ya está resuelta por
+        # definición, tenga o no decisión registrada (p.ej. duplicados/históricos
+        # cerrados por otra vía) — no debe seguir contando como "pendiente" para siempre.
+        #
+        # FIX C.2 — el filtro anterior solo excluía filas con un borrador TODAVÍA en
+        # estado_final=="BORRADOR_PENDIENTE". En cuanto un borrador de aprobación se
+        # enviaba de verdad y el Paso 9 lo verificaba (estado_final pasa a
+        # ENVIADO_VERIFICADO_GMAIL, DISCREPANCIA o DESCONOCIDO), la fila DESAPARECÍA de
+        # ya_con_borrador y volvía a contarse como "sin borrador todavía" — falso
+        # positivo permanente para cualquier solicitud cuyo correo de aprobación ya se
+        # envió. Ahora se considera "ya se hizo el Paso 3" si existe CUALQUIER registro
+        # solicitud_aprobacion para ese request_id, sin importar en qué estado_final esté.
+        ya_tiene_solicitud_aprobacion = {
             r.get("request_id")
             for r in seguimiento_rows
             if (r.get("tipo_email") or "").strip() == "solicitud_aprobacion"
-            and (r.get("estado_final") or "").strip() == "BORRADOR_PENDIENTE"
         }
         candidatas_paso3 = [
             r for r in solicitudes
@@ -489,7 +516,8 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
             and not es_true(r.get("approved"))
             and not es_true(r.get("rejected"))
             and not es_true(r.get("changes_requested"))
-            and r.get("request_id") not in ya_con_borrador
+            and not es_true(r.get("closed"))
+            and r.get("request_id") not in ya_tiene_solicitud_aprobacion
         ]
         if candidatas_paso3:
             pasos["3"] = True
