@@ -97,7 +97,13 @@ SCOPES = [
 # deliberadamente duplicadas aquí en vez de importadas: son dos workflows/Actions
 # independientes en el mismo repo, y mantenerlas como constantes locales evita
 # acoplar el import a la ruta exacta del otro script en el runner.
-STRUCTURAL_BLOCK_MARKERS = ("PENDIENTE_MANUAL_CONFIRMADO", "MANUAL_INTERVENTION")
+#
+# CAMBIO 2026-07-14: se añadió "BLOQUEO_PDF" (bug real confirmado: UAWUVW7 tenía
+# last_error="BLOQUEO_PDF_..." y esta tupla no lo reconocía, así que este mismo
+# Action NUNCA lo tomaba como candidato — se quedaba esperando un GitHub Action que
+# jamás lo iba a recoger). Mantener esta tupla sincronizada con la de
+# check_pipeline_status.py si en el futuro aparece alguna marca nueva.
+STRUCTURAL_BLOCK_MARKERS = ("PENDIENTE_MANUAL_CONFIRMADO", "MANUAL_INTERVENTION", "BLOQUEO_PDF")
 
 PLACEHOLDER = "Fecha de publicación: --/--/----"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -107,7 +113,15 @@ PDF_MIME = "application/pdf"
 # documental con forma "Palabra_S-NNNN_NN" (p.ej. "Informe_S-6009_26") dentro de
 # cabeceras/pies, para poder sustituirla por la reference real reservada cuando el
 # documento llega con una referencia antigua/de plantilla copiada de otro expediente.
-REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-\d{3,5}_\d{2}")
+#
+# AMPLIADO 2026-07-14 (pedido explícito de Daniel): las plantillas usan un placeholder
+# literal con X en vez de dígitos antes de rellenar la referencia real (mismo patrón de
+# diseño que "Fecha de publicación: --/--/----" para la fecha) — p.ej.
+# "Informe_S-XXXX_XX", "Informe_S-xxxx_xx", o incluso formas mixtas medio sin rellenar
+# como "Informe_S-6009_XX". El patrón ahora acepta dígitos O bloques de X/x (en
+# cualquier combinación de mayúsculas/minúsculas) en cada tramo, para que el
+# placeholder sin rellenar se detecte y corrija igual que una referencia equivocada.
+REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-(?:\d{3,5}|[Xx]{3,5})_(?:\d{2}|[Xx]{2})")
 
 SOLICITUDES_SHEET = "SOLICITUDES"
 
@@ -268,14 +282,16 @@ def patch_docx_publication_date(docx_bytes, new_date):
 
 
 def patch_docx_reference(docx_bytes, correct_reference):
-    """AÑADIDO 2026-07-13. Busca en CUALQUIER header*.xml/footer*.xml del documento
-    texto con forma de referencia documental (REFERENCE_PATTERN) que no coincida con
-    correct_reference, y lo sustituye. Devuelve (nuevo_docx_bytes, cambiado,
+    """AÑADIDO 2026-07-13, AMPLIADO 2026-07-14. Busca en CUALQUIER header*.xml/footer*.xml
+    del documento texto con forma de referencia documental (REFERENCE_PATTERN) que no
+    coincida con correct_reference, y lo sustituye. Devuelve (nuevo_docx_bytes, cambiado,
     referencias_incorrectas_encontradas). No toca el cuerpo del documento ni ningún
     otro contenido. Detección por patrón, no por lista cerrada: si la cabecera no
     sigue ese formato exacto, o el texto está partido en varias runs de XML por
     ediciones previas de Word, simplemente no encontrará nada que corregir (mismo
-    tipo de limitación ya conocida y aceptada para el placeholder de fecha)."""
+    tipo de limitación ya conocida y aceptada para el placeholder de fecha). Desde
+    2026-07-14 también detecta y corrige el placeholder de plantilla sin rellenar
+    (p.ej. "Informe_S-XXXX_XX"), no solo referencias reales equivocadas."""
     zin = zipfile.ZipFile(io.BytesIO(docx_bytes), "r")
     changed = False
     encontradas = set()
