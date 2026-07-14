@@ -1,0 +1,44 @@
+name: Send Discord notifications (expedientes publicados)
+
+# Por qué existe: aviso automático a Discord en cuanto un expediente del pipeline
+# Solaris queda 100% publicado (Notion + Drive verificados), sin que el revisor
+# tenga que copiar/pegar nada en ningún GPT. Ver scripts/send_discord_notifications.py
+# para el detalle completo.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "*/15 * * * *"  # cada 15 min — ajusta aquí si quieres más/menos rápido
+
+permissions:
+  contents: read
+
+jobs:
+  send-discord-notifications:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias Python
+        run: |
+          pip install --upgrade pip
+          pip install google-api-python-client google-auth
+          # Nota: la llamada al webhook de Discord usa urllib.request de la
+          # librería estándar, no se añade 'requests' como dependencia nueva.
+
+      - name: Enviar notificaciones pendientes a Discord
+        env:
+          GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Opcional: URL pública de un logo para que el webhook se muestre como
+          # "Solaris · Documentación" con icono. Si no se define este secret, el
+          # script sigue funcionando igual, solo sin avatar/icono personalizado.
+          DISCORD_AVATAR_URL: ${{ secrets.DISCORD_AVATAR_URL }}
+        run: python3 scripts/send_discord_notifications.py
