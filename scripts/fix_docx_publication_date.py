@@ -124,6 +124,31 @@ PDF_MIME = "application/pdf"
 REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-(?:\d{3,5}|[Xx]{3,5})_(?:\d{2}|[Xx]{2})")
 
 SOLICITUDES_SHEET = "SOLICITUDES"
+CONFIG_SHEET = "CONFIG"
+
+# AÑADIDO 2026-07-14 (pedido explícito de Daniel) — campo "Revisor/es" del documento.
+# Cowork YA NO edita este campo directamente (mismo límite estructural de tamaño que
+# fecha/referencia): en el Paso 4 de "04_procesar_respuesta_revisor" v5 decide el texto
+# final (nombre(s) resuelto(s) vía Notion + juicio sobre si ya está presente, y la
+# etiqueta correcta "Revisor:"/"Revisores:" según cuántos queden) y lo dejan escrito en
+# las columnas revisor_field_pendiente=TRUE / revisor_field_valor de SOLICITUDES. Este
+# Action se limita a la parte mecánica: encontrar el campo en el footer y sustituirlo
+# por ese texto ya decidido, tal cual.
+#
+# Detección: como Daniel confirmó que este campo SIEMPRE va en el footer (nunca en el
+# cuerpo ni en la cabecera), y puede aparecer como "Revisor:", "Revisor/es:" o
+# "Revisores:" indistintamente, se prueba una LISTA de patrones (no uno solo) contra
+# cada footer*.xml, en el orden en que aparecen en CONFIG.REVISOR_FIELD_KNOWN_PATTERNS
+# (JSON, lista de strings de regex). Si ninguno coincide, no se inventa nada ni se
+# bloquea el resto del ciclo: se marca la fila con revisor_field_diagnostico_pendiente
+# =TRUE para que Cowork abra el documento, vea cómo aparece de verdad el campo ahí, y
+# escriba el patrón/formato observado en revisor_field_patron_sugerido — ese patrón se
+# prueba primero en la siguiente corrida de este mismo Action, y si funciona, se añade
+# también a la lista permanente en CONFIG para que futuros documentos con el mismo
+# formato no vuelvan a necesitar escalar. Si el problema real es que Word partió el
+# texto en varias runs de XML (no una simple variante de etiqueta), ningún patrón nuevo
+# lo va a arreglar — ese caso cae a MANUAL_INTERVENTION, igual que con fecha/referencia.
+DEFAULT_REVISOR_FIELD_PATTERNS = [r"Revisor(?:/es|es)?:\s*[^<]{0,150}"]
 
 
 # --------------------------------------------------------------------------------------
@@ -229,6 +254,129 @@ def actualizar_last_error_y_updated_at(sheets, header, row_number, nuevo_last_er
     ).execute()
 
 
+def actualizar_columnas(sheets, header, row_number, valores: dict):
+    """Igual que actualizar_last_error_y_updated_at pero para un conjunto arbitrario
+    de columnas de SOLICITUDES (dict columna->valor), en una sola llamada batchUpdate.
+    Columnas que no existan en header se ignoran silenciosamente (para que este script
+    no reviente si Daniel todavía no ha añadido alguna columna nueva a la Sheet)."""
+    data = []
+    for col_name, value in valores.items():
+        if col_name not in header:
+            print(f"AVISO: la columna '{col_name}' no existe en SOLICITUDES, se omite esa escritura.", file=sys.stderr)
+            continue
+        idx = header.index(col_name)
+        data.append({
+            "range": f"{SOLICITUDES_SHEET}!{col_letter(idx)}{row_number}",
+            "values": [[value]],
+        })
+    if not data:
+        return
+    sheets.spreadsheets().values().batchUpdate(
+        spreadsheetId=SPREADSHEET_ID,
+        body={"valueInputOption": "RAW", "data": data},
+    ).execute()
+
+
+# --------------------------------------------------------------------------------------
+# CONFIG — lectura/escritura genérica key/value, mismo estilo que check_pipeline_status.py
+# (deliberadamente duplicado aquí en vez de importado: dos Actions independientes).
+# --------------------------------------------------------------------------------------
+
+def read_config(sheets):
+    resp = sheets.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=f"{CONFIG_SHEET}!A1:Z").execute()
+    values = resp.get("values", [])
+    if not values:
+        return {}
+    header = [h.strip() for h in values[0]]
+    try:
+        key_col = header.index("key")
+    except ValueError:
+        key_col = 0
+    try:
+        value_col = header.index("value")
+    except ValueError:
+        value_col = 1
+    config = {}
+    for row in values[1:]:
+        key = row[key_col] if key_col < len(row) else ""
+        value = row[value_col] if value_col < len(row) else ""
+        if key:
+            config[key] = value
+    return config
+
+
+def upsert_config_value(sheets, key, value):
+    """Escribe o actualiza una fila key/value en CONFIG. Si la key ya existe,
+    actualiza solo su celda 'value'; si no, añade una fila nueva al final."""
+    resp = sheets.spreadsheets().values().get(spreadsheetId=SPREADSHEET_ID, range=f"{CONFIG_SHEET}!A1:Z").execute()
+    values = resp.get("values", [])
+    if not values:
+        raise RuntimeError("CONFIG está vacío, no se puede escribir.")
+    header = [h.strip() for h in values[0]]
+    try:
+        key_col = header.index("key")
+    except ValueError:
+        key_col = 0
+    try:
+        value_col = header.index("value")
+    except ValueError:
+        value_col = 1
+
+    row_idx = None
+    for i, row in enumerate(values[1:], start=2):
+        cell_key = row[key_col] if key_col < len(row) else ""
+        if str(cell_key).strip() == key:
+            row_idx = i
+            break
+
+    if row_idx is not None:
+        rng = f"{CONFIG_SHEET}!{col_letter(value_col)}{row_idx}"
+        sheets.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID, range=rng, valueInputOption="RAW", body={"values": [[value]]},
+        ).execute()
+    else:
+        new_row = [""] * (max(key_col, value_col) + 1)
+        new_row[key_col] = key
+        new_row[value_col] = value
+        sheets.spreadsheets().values().append(
+            spreadsheetId=SPREADSHEET_ID, range=f"{CONFIG_SHEET}!A1",
+            valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": [new_row]},
+        ).execute()
+
+
+def get_revisor_field_patterns(config):
+    """Lee CONFIG.REVISOR_FIELD_KNOWN_PATTERNS (JSON, lista de strings de regex).
+    Si falta, está vacía o no es JSON válido, cae a DEFAULT_REVISOR_FIELD_PATTERNS
+    (nunca se queda sin ningún patrón que probar)."""
+    raw = config.get("REVISOR_FIELD_KNOWN_PATTERNS")
+    if not raw:
+        return list(DEFAULT_REVISOR_FIELD_PATTERNS)
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list) and all(isinstance(p, str) for p in parsed) and parsed:
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    return list(DEFAULT_REVISOR_FIELD_PATTERNS)
+
+
+def add_revisor_field_pattern_if_new(sheets, config, pattern):
+    """Añade `pattern` a la lista permanente de CONFIG.REVISOR_FIELD_KNOWN_PATTERNS si
+    todavía no está (dedup exacto de string). Así, un patrón que Cowork diagnosticó para
+    un documento concreto queda disponible automáticamente para el resto sin escalar de
+    nuevo. No falla el ciclo si esto no se puede escribir (falta de permiso Editor en la
+    Sheet, etc.) — solo lo avisa por stderr."""
+    patterns = get_revisor_field_patterns(config)
+    if pattern in patterns:
+        return
+    patterns.append(pattern)
+    try:
+        upsert_config_value(sheets, "REVISOR_FIELD_KNOWN_PATTERNS", json.dumps(patterns, ensure_ascii=False))
+        print(f"CONFIG.REVISOR_FIELD_KNOWN_PATTERNS ampliado con el nuevo patrón: {pattern!r}")
+    except Exception as exc:
+        print(f"AVISO: no se pudo persistir el nuevo patrón en CONFIG: {exc}", file=sys.stderr)
+
+
 # --------------------------------------------------------------------------------------
 # Drive — descarga, parcheo del DOCX, conversión a PDF, subida.
 #
@@ -317,6 +465,62 @@ def patch_docx_reference(docx_bytes, correct_reference):
             zout.writestr(item, data)
 
     return out_buf.getvalue(), changed, sorted(encontradas)
+
+
+def patch_docx_revisor_field(docx_bytes, patterns, nuevo_valor):
+    """AÑADIDO 2026-07-14. Busca en CUALQUIER footer*.xml (confirmado por Daniel: este
+    campo SIEMPRE va en el footer) el campo "Revisor/es" en cualquiera de sus 3 formas
+    ("Revisor:", "Revisor/es:", "Revisores:"), probando `patterns` en orden hasta que
+    uno haga match, y sustituye el fragmento encontrado COMPLETO (etiqueta + valor
+    actual) por `nuevo_valor` tal cual — ya viene decidido de antemano (etiqueta
+    singular/plural correcta + nombre(s)) por Cowork en 04_procesar_respuesta_revisor,
+    este Action no decide nada, solo escribe. Devuelve (nuevo_docx_bytes, cambiado,
+    patron_usado). Solo se sustituye la PRIMERA aparición encontrada (count=1): este
+    campo debería aparecer una sola vez por documento; si aparece más de una, es una
+    señal a investigar manualmente, no algo que este script deba intentar adivinar.
+
+    Igual que con fecha/referencia: si el texto está partido en varias runs de XML por
+    ediciones manuales previas de Word, ningún patrón de estos lo va a encontrar —
+    limitación conocida y aceptada, no un fallo de esta función."""
+    zin = zipfile.ZipFile(io.BytesIO(docx_bytes), "r")
+    changed = False
+    patron_usado = None
+    out_buf = io.BytesIO()
+
+    compiled = []
+    for p in patterns:
+        try:
+            compiled.append((p, re.compile(p)))
+        except re.error as exc:
+            print(f"AVISO: patrón de Revisor/es inválido, se omite ({p!r}): {exc}", file=sys.stderr)
+
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if not changed and re.match(r"word/footer\d*\.xml$", item.filename):
+                text = data.decode("utf-8")
+                for patron_str, patron_re in compiled:
+                    new_text, n = patron_re.subn(nuevo_valor, text, count=1)
+                    if n > 0:
+                        text = new_text
+                        data = text.encode("utf-8")
+                        changed = True
+                        patron_usado = patron_str
+                        break
+            zout.writestr(item, data)
+
+    return out_buf.getvalue(), changed, patron_usado
+
+
+def generar_y_subir_pdf(drive, docx_bytes, folder_id, reference):
+    """Convierte docx_bytes a PDF con LibreOffice headless y lo sube como archivo NUEVO
+    a folder_id (nunca sobrescribe un PDF existente por fileId — mismo criterio que ya
+    usaba main() para el flujo de fecha/referencia). Devuelve el fileId del PDF nuevo.
+    Factorizado 2026-07-14 para reutilizarlo también en el flujo del campo Revisor/es."""
+    with tempfile.TemporaryDirectory() as workdir:
+        pdf_bytes = convert_docx_to_pdf(docx_bytes, workdir)
+    pdf_filename = f"{reference}.pdf"
+    return upload_new_file(drive, folder_id, pdf_filename, pdf_bytes, PDF_MIME)
 
 
 def convert_docx_to_pdf(docx_bytes, workdir):
@@ -461,12 +665,108 @@ def main():
             errors.append((request_id, str(exc)))
             print(f"[{request_id}] ERROR: {exc}", file=sys.stderr)
 
-    print("\n--- Resumen ---")
+    print("\n--- Resumen (fecha/referencia) ---")
     print(f"Corregidos: {fixed}")
     print(f"Omitidos: {skipped}")
     print(f"Errores: {errors}")
 
-    if errors:
+    # ------------------------------------------------------------------------------
+    # AÑADIDO 2026-07-14 — campo "Revisor/es": procesa por separado las filas donde
+    # Cowork dejó revisor_field_pendiente=TRUE, independientemente de si también
+    # tenían un bloqueo estructural de fecha/referencia (puede ser cualquier
+    # expediente recién aprobado, no solo los ya diagnosticados arriba).
+    # ------------------------------------------------------------------------------
+    config = read_config(sheets)
+    patrones_base = get_revisor_field_patterns(config)
+
+    revisor_candidatas = [
+        r for r in filas
+        if es_true(r.get("revisor_field_pendiente")) and not es_true(r.get("closed"))
+    ]
+
+    revisor_fixed = []
+    revisor_escalados = []
+    revisor_errors = []
+
+    for row in revisor_candidatas:
+        request_id = row.get("request_id")
+        if not request_id:
+            continue
+
+        docx_file_id = row.get("drive_docx_file_id") or row.get("source_drive_file_id")
+        folder_id = row.get("drive_folder_id")
+        reference = row.get("reference") or request_id
+        nuevo_valor = row.get("revisor_field_valor")
+
+        if not docx_file_id or not folder_id or not nuevo_valor:
+            revisor_errors.append((request_id, "sin drive_docx_file_id/drive_folder_id/revisor_field_valor"))
+            continue
+
+        # Si Cowork ya diagnosticó un patrón concreto para esta fila (escalado en un
+        # ciclo anterior), se prueba PRIMERO ese, antes que la lista general — es más
+        # específico y ya sabemos que describe este documento en concreto.
+        patron_sugerido = row.get("revisor_field_patron_sugerido")
+        patrones_a_probar = ([patron_sugerido] if patron_sugerido else []) + patrones_base
+
+        try:
+            print(f"[{request_id}] (Revisor/es) descargando {docx_file_id} ...")
+            original_bytes = download_file(drive, docx_file_id)
+
+            new_bytes, changed, patron_usado = patch_docx_revisor_field(original_bytes, patrones_a_probar, nuevo_valor)
+
+            if not changed:
+                # Ningún patrón conocido coincidió: escalar a Cowork para diagnóstico,
+                # sin bloquear el resto del ciclo ni marcar el expediente como error.
+                actualizar_columnas(sheets, header, row["_row_number"], {
+                    "revisor_field_diagnostico_pendiente": "TRUE",
+                    "last_error": (
+                        "REVISOR_FIELD_PATRON_NO_ENCONTRADO: ningún patrón conocido de "
+                        "CONFIG.REVISOR_FIELD_KNOWN_PATTERNS (ni el patrón sugerido, si había) "
+                        "coincide en ningún footer de este DOCX. Pendiente de diagnóstico por Cowork."
+                    ),
+                    "updated_at": now_iso(),
+                })
+                revisor_escalados.append(request_id)
+                print(f"[{request_id}] (Revisor/es) ningún patrón coincidió, escalado a diagnóstico.")
+                continue
+
+            print(f"[{request_id}] (Revisor/es) patrón usado: {patron_usado!r}; subiendo DOCX corregido ...")
+            update_drive_file_content(drive, docx_file_id, new_bytes, DOCX_MIME)
+
+            # Si el patrón que funcionó vino del diagnóstico de Cowork (no estaba ya en
+            # la lista permanente), se añade a CONFIG para que futuros documentos con el
+            # mismo formato no necesiten volver a escalar.
+            if patron_usado not in patrones_base:
+                add_revisor_field_pattern_if_new(sheets, config, patron_usado)
+                patrones_base = get_revisor_field_patterns(config)
+
+            print(f"[{request_id}] (Revisor/es) regenerando PDF ...")
+            pdf_file_id = generar_y_subir_pdf(drive, new_bytes, folder_id, reference)
+
+            resolved_note = (
+                f"RESUELTO_AUTOMATICO_{now_iso()}_via_github_action_fix_docx_publication_date_revisor_field: "
+                f"campo Revisor/es actualizado ({nuevo_valor}), PDF regenerado y subido (fileId {pdf_file_id})."
+            )
+            actualizar_columnas(sheets, header, row["_row_number"], {
+                "revisor_field_pendiente": "FALSE",
+                "revisor_field_diagnostico_pendiente": "FALSE",
+                "revisor_field_patron_sugerido": "",
+                "last_error": resolved_note,
+                "updated_at": now_iso(),
+            })
+            revisor_fixed.append((request_id, pdf_file_id))
+            print(f"[{request_id}] (Revisor/es) OK.")
+
+        except Exception as exc:  # noqa: BLE001
+            revisor_errors.append((request_id, str(exc)))
+            print(f"[{request_id}] (Revisor/es) ERROR: {exc}", file=sys.stderr)
+
+    print("\n--- Resumen (campo Revisor/es) ---")
+    print(f"Corregidos: {revisor_fixed}")
+    print(f"Escalados a diagnóstico: {revisor_escalados}")
+    print(f"Errores: {revisor_errors}")
+
+    if errors or revisor_errors:
         sys.exit(1)
 
 
