@@ -89,7 +89,6 @@ import sys
 import tempfile
 import zipfile
 from datetime import datetime, timezone
-from xml.etree import ElementTree as ET
 
 try:
     from zoneinfo import ZoneInfo
@@ -143,29 +142,116 @@ REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-(?:\d{3,5}|[Xx]{3,5}
 # ampliar REFERENCE_PATTERN arriba): con el patrón ya ampliado, el Action volvió a
 # correr, corrigió la fecha, pero la referencia SEGUÍA sin corregirse — confirmado
 # descargando el PDF resultante y viendo "Informe_S-XXXX_XX" intacto en cabecera/pie.
-# Causa: patch_docx_reference (más abajo) hace un regex.sub sobre el TEXTO CRUDO del
-# XML de header/footer. Si Word partió el placeholder en varias runs (<w:r><w:t>...
-# </w:t></w:r>) — típico cuando las "XXXX" llevan un resaltado/color distinto al
-# resto del texto, para que destaque visualmente como placeholder —, entre
-# "Informe_S-" y "XXXX_XX" en el XML crudo hay tags de cierre/apertura de run
-# (</w:t></w:r><w:r>...<w:t>), así que el regex sobre texto crudo nunca hace match
-# aunque visualmente (y para cualquiera que abra el documento) sea una sola cadena
-# continua. Ya estaba anticipado como limitación conocida en el docstring de
-# patch_docx_reference, pero nunca se había confirmado en un caso real hasta ahora.
-# Solución: _reference_still_present + _patch_reference_split_runs (ambas abajo)
-# reconstruyen el texto real concatenando los <w:t> de cada párrafo (<w:p>) — igual
-# que lo vería Word al renderizar — y si encuentran ahí una referencia sin corregir
-# que el regex simple no pudo tocar, editan solo el contenido de los <w:t> afectados
-# (splice quirúrgico dentro del árbol XML ya parseado), dejando intactas todas las
-# demás runs, tags y atributos de formato (rPr, resaltado, etc.). Es un fallback:
-# SOLO se activa cuando la sustitución simple no encontró nada pero el texto
-# reconstruido demuestra que sigue mal — así el caso simple (una sola run, el que ya
-# funcionaba en VAXBFDH/A7F4NFG/UAWUVW7) sigue resolviéndose exactamente igual que
-# antes, sin cambiar su comportamiento ya probado en producción.
-_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-ET.register_namespace("w", _W_NS)
-_T_TAG = f"{{{_W_NS}}}t"
-_P_TAG = f"{{{_W_NS}}}p"
+# Causa real (confirmada 2026-07-20 abriendo el .docx original de este expediente,
+# el que Daniel subió tal cual venía del formulario): el placeholder vive dentro de
+# un CUADRO DE TEXTO flotante en el header (<w:drawing>...<wps:txbx><w:txbxContent>),
+# duplicado dos veces por el propio Word dentro de <mc:AlternateContent> (una copia
+# moderna en <mc:Choice> vía DrawingML, y una copia de compatibilidad en
+# <mc:Fallback><w:pict>... vía VML) — patrón MUY común en plantillas corporativas
+# con cabeceras de diseño. Además, dentro de ese cuadro de texto, el placeholder
+# está partido en variar runs (<w:r><w:t>Informe_S</w:t></w:r>...<w:t>-</w:t>...
+# <w:t>XXX</w:t></w:r><w:t>X_XX</w:t>) porque cada fragmento tiene un <w:rPr>
+# ligeramente distinto (aunque visualmente sea una sola cadena continua).
+#
+# Primer intento (fallido, no se llegó a desplegar en producción): un fallback que
+# reparseaba el XML de header/footer entero con xml.etree.ElementTree, reconstruía
+# el texto por párrafo, y volvía a serializar el árbol completo con ET.tostring().
+# Probado contra el .docx real de este expediente: SÍ encontraba y corregía el
+# placeholder correctamente a nivel de texto, PERO ET.tostring() renombra TODOS los
+# prefijos de namespace del documento (mc, wps, wp, r, v, a... pasan a ns1, ns2,
+# ns3...) porque solo se había registrado el prefijo "w" — un cambio innecesariamente
+# agresivo para un documento con dibujos/cuadros de texto/VML como este, y con riesgo
+# real de romper referencias de relación (r:id/r:embed) o el propio mc:Ignorable en
+# lectores más estrictos que LibreOffice. Descartado antes de desplegarlo.
+#
+# Solución final (la que se despliega abajo, verificada de extremo a extremo: DOCX
+# real de este expediente -> parcheado -> convertido a PDF con LibreOffice headless
+# en un sandbox de pruebas -> 23 de 24 páginas confirmadas con "Informe_S-2011_26"
+# correcto, 0 páginas con el placeholder, portada sin referencia como es de esperar):
+# _patch_reference_surgical NO reparsea ni reserializa el XML en ningún momento.
+# Usa un regex para localizar CADA <w:t>...</w:t> del archivo (sin tocar sus tags,
+# atributos ni nada de alrededor), concatena su contenido para reconstruir el texto
+# real tal como lo ve Word al renderizar (igual idea que el intento anterior, pero
+# sin pasar por un parser/serializador completo), encuentra ahí las referencias
+# incorrectas, y edita ÚNICAMENTE los tramos de texto exactos (por posición, sobre el
+# string original) de los <w:t> afectados — el resto del archivo, namespaces
+# incluidos, queda byte a byte idéntico al original. Corrige automáticamente TODAS
+# las copias del placeholder que haya en el archivo (p.ej. las de mc:Choice y
+# mc:Fallback a la vez), sin necesidad de saber de antemano cuántas hay ni dónde.
+_T_ELEM_RE = re.compile(r"<w:t(?:\s[^>]*)?>(.*?)</w:t>", re.DOTALL)
+
+
+def _xml_unescape(s):
+    return (s.replace("&lt;", "<").replace("&gt;", ">")
+             .replace("&apos;", "'").replace("&quot;", '"').replace("&amp;", "&"))
+
+
+def _xml_escape(s):
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _patch_reference_surgical(xml_text, correct_reference):
+    """Ver nota larga arriba. Localiza REFERENCE_PATTERN sobre el texto reconstruido
+    de TODOS los <w:t> del archivo (whole-file, no por párrafo — más simple y ya
+    suficiente: el patrón es lo bastante específico como para que un match espurio
+    cruzando dos runs de párrafos distintos sea prácticamente imposible en la
+    práctica) y edita solo el contenido de los <w:t> afectados sobre el string
+    original, sin reparsear ni reserializar nada. Devuelve (nuevo_texto, cambiado,
+    referencias_encontradas). Corrige todas las apariciones que haya (p.ej. las
+    copias duplicadas de mc:Choice/mc:Fallback), no solo la primera."""
+    t_matches = list(_T_ELEM_RE.finditer(xml_text))
+    if not t_matches:
+        return xml_text, False, []
+
+    texts = [_xml_unescape(m.group(1)) for m in t_matches]
+    full_text = "".join(texts)
+    ref_matches = list(REFERENCE_PATTERN.finditer(full_text))
+    if not ref_matches:
+        return xml_text, False, []
+
+    offsets = []
+    pos = 0
+    for m, txt in zip(t_matches, texts):
+        offsets.append((pos, pos + len(txt), m))
+        pos += len(txt)
+
+    edits = []  # (start_en_xml_text, end_en_xml_text, contenido_nuevo_ya_escapado)
+    encontradas = set()
+
+    for rm in ref_matches:
+        found_text = rm.group(0)
+        if found_text == correct_reference:
+            continue
+        start, end = rm.start(), rm.end()
+        affected = [(a, b, m) for (a, b, m) in offsets if b > start and a < end]
+        if not affected:
+            continue
+        encontradas.add(found_text)
+        first_a, _, first_m = affected[0]
+        last_a, _, last_m = affected[-1]
+        first_idx = t_matches.index(first_m)
+        last_idx = t_matches.index(last_m)
+        prefix = texts[first_idx][: max(0, start - first_a)]
+        suffix = texts[last_idx][max(0, end - last_a):]
+        if first_m is last_m:
+            edits.append((first_m.start(1), first_m.end(1), _xml_escape(prefix + correct_reference + suffix)))
+        else:
+            edits.append((first_m.start(1), first_m.end(1), _xml_escape(prefix + correct_reference)))
+            edits.append((last_m.start(1), last_m.end(1), _xml_escape(suffix)))
+            for (_, _, mid_m) in affected[1:-1]:
+                edits.append((mid_m.start(1), mid_m.end(1), ""))
+
+    if not edits:
+        return xml_text, False, []
+
+    # aplica de atras hacia adelante para no invalidar las posiciones ya calculadas
+    edits.sort(key=lambda e: e[0], reverse=True)
+    new_text = xml_text
+    for start, end, replacement in edits:
+        new_text = new_text[:start] + replacement + new_text[end:]
+
+    return new_text, True, sorted(encontradas)
+
 
 SOLICITUDES_SHEET = "SOLICITUDES"
 
@@ -405,124 +491,31 @@ def patch_docx_publication_date(docx_bytes, new_date):
     return out_buf.getvalue(), changed
 
 
-def _reference_still_present(xml_bytes, correct_reference):
-    """AÑADIDO 2026-07-20 (FIX F). Reconstruye el texto real de un header/footer.xml
-    concatenando todos los <w:t> (así es como lo ve Word al renderizar, sin importar
-    en cuántas runs esté partido) y comprueba si sigue habiendo una referencia sin
-    corregir aunque el regex simple sobre el XML crudo no encontrara nada."""
-    try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError:
-        return False
-    full_text = "".join(t.text or "" for t in root.iter(_T_TAG))
-    for m in REFERENCE_PATTERN.finditer(full_text):
-        if m.group(0) != correct_reference:
-            return True
-    return False
-
-
-def _patch_reference_split_runs(xml_bytes, correct_reference):
-    """AÑADIDO 2026-07-20 (FIX F, caso real 79E115DB). Fallback de patch_docx_reference
-    para cuando la referencia está partida en varias runs de Word (típico cuando el
-    placeholder "XXXX" lleva un resaltado/formato distinto al resto del texto). Opera
-    sobre el texto reconstruido de cada párrafo (<w:p>) en vez de sobre el XML crudo:
-    localiza el match en el texto concatenado, y hace un splice quirúrgico solo en el
-    contenido de los <w:t> afectados (el primero recibe el prefijo real + la
-    referencia correcta, el último conserva su sufijo real, los intermedios quedan
-    vacíos) — nunca toca tags, atributos ni runs no afectadas. Devuelve (nuevos_bytes,
-    cambiado, referencias_encontradas). Probado con casos de referencia partida en 2 y
-    3 runs, con prefijo/sufijo de texto real alrededor, e idempotencia (correrlo dos
-    veces sobre un resultado ya corregido no vuelve a tocar nada)."""
-    changed = False
-    encontradas = set()
-    try:
-        root = ET.fromstring(xml_bytes)
-    except ET.ParseError:
-        return xml_bytes, False, []
-
-    for p in root.iter(_P_TAG):
-        t_elems = list(p.iter(_T_TAG))
-        if not t_elems:
-            continue
-        texts = [t.text or "" for t in t_elems]
-        full_text = "".join(texts)
-        matches = list(REFERENCE_PATTERN.finditer(full_text))
-        if not matches:
-            continue
-
-        offsets = []
-        pos = 0
-        for t, txt in zip(t_elems, texts):
-            offsets.append((pos, pos + len(txt), t))
-            pos += len(txt)
-
-        for m in reversed(matches):
-            found_text = m.group(0)
-            if found_text == correct_reference:
-                continue
-            start, end = m.start(), m.end()
-            affected = [(a, b, t) for (a, b, t) in offsets if b > start and a < end]
-            if not affected:
-                continue
-            encontradas.add(found_text)
-            first_a, _, first_t = affected[0]
-            last_a, _, last_t = affected[-1]
-            prefix = (first_t.text or "")[: max(0, start - first_a)]
-            suffix = (last_t.text or "")[max(0, end - last_a):]
-            if first_t is last_t:
-                first_t.text = prefix + correct_reference + suffix
-            else:
-                first_t.text = prefix + correct_reference
-                last_t.text = suffix
-                for (_, _, t) in affected[1:-1]:
-                    t.text = ""
-            changed = True
-
-    if not changed:
-        return xml_bytes, False, []
-    new_xml = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + ET.tostring(root, encoding="utf-8")
-    return new_xml, True, sorted(encontradas)
-
-
 def patch_docx_reference(docx_bytes, correct_reference):
-    """AÑADIDO 2026-07-13, AMPLIADO 2026-07-20 (FIX F). Busca en CUALQUIER
-    header*.xml/footer*.xml del documento texto con forma de referencia documental
-    (REFERENCE_PATTERN) que no coincida con correct_reference, y lo sustituye.
-    Devuelve (nuevo_docx_bytes, cambiado, referencias_incorrectas_encontradas). No
-    toca el cuerpo del documento ni ningún otro contenido. Primero intenta la
-    sustitución simple sobre el XML crudo (camino ya probado en producción con
-    VAXBFDH/A7F4NFG/UAWUVW7); si no encuentra nada pero el texto reconstruido
-    (uniendo los <w:t> de verdad) demuestra que la referencia sigue mal, cae al
-    fallback paragraph-aware (_patch_reference_split_runs) que sí sabe corregirla
-    aunque esté partida en varias runs de Word."""
+    """AÑADIDO 2026-07-13, REESCRITO 2026-07-20 (FIX F, verificado de extremo a
+    extremo contra el .docx real de 79E115DB + conversión con LibreOffice headless).
+    Busca en CUALQUIER header*.xml/footer*.xml del documento texto con forma de
+    referencia documental (REFERENCE_PATTERN) que no coincida con correct_reference,
+    y lo sustituye — incluidas las apariciones partidas en varias runs de Word (ver
+    _patch_reference_surgical arriba) y las copias duplicadas que Word suele generar
+    en cabeceras con cuadros de texto (mc:Choice + mc:Fallback). Devuelve
+    (nuevo_docx_bytes, cambiado, referencias_incorrectas_encontradas). No toca el
+    cuerpo del documento ni ningún otro contenido."""
     zin = zipfile.ZipFile(io.BytesIO(docx_bytes), "r")
     changed = False
     encontradas = set()
     out_buf = io.BytesIO()
-
-    def _reemplazar(match):
-        nonlocal changed
-        texto_encontrado = match.group(0)
-        if texto_encontrado == correct_reference:
-            return texto_encontrado
-        encontradas.add(texto_encontrado)
-        changed = True
-        return correct_reference
 
     with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
             data = zin.read(item.filename)
             if re.match(r"word/(header|footer)\d*\.xml$", item.filename):
                 text = data.decode("utf-8")
-                new_text = REFERENCE_PATTERN.sub(_reemplazar, text)
-                if new_text != text:
+                new_text, file_changed, found = _patch_reference_surgical(text, correct_reference)
+                if file_changed:
                     data = new_text.encode("utf-8")
-                elif _reference_still_present(data, correct_reference):
-                    new_data, split_changed, split_found = _patch_reference_split_runs(data, correct_reference)
-                    if split_changed:
-                        data = new_data
-                        changed = True
-                        encontradas.update(split_found)
+                    changed = True
+                    encontradas.update(found)
             zout.writestr(item, data)
 
     return out_buf.getvalue(), changed, sorted(encontradas)
