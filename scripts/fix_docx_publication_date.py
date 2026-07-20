@@ -117,7 +117,19 @@ PDF_MIME = "application/pdf"
 # documental con forma "Palabra_S-NNNN_NN" (p.ej. "Informe_S-6009_26") dentro de
 # cabeceras/pies, para poder sustituirla por la reference real reservada cuando el
 # documento llega con una referencia antigua/de plantilla copiada de otro expediente.
-REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-\d{3,5}_\d{2}")
+#
+# AMPLIADO 2026-07-20 (bug real detectado en el caso 79E115DB): el patrón original
+# solo admitía DÍGITOS en el ID y el año (\d{3,5} y \d{2}), así que nunca detectaba
+# un placeholder de plantilla sin rellenar del tipo "Informe_S-XXXX_XX" (letras X,
+# no dígitos) — el caso más común de "referencia incorrecta o ausente" que reporta
+# 02_analisis_documento. El run real de 79E115DB confirmó esto: corrigió la fecha
+# pero dejó "Informe_S-XXXX_XX" intacto en las 20+ páginas del documento porque el
+# regex simplemente no hacía match. Ahora el patrón admite también series de X/x en
+# vez de dígitos en cualquiera de las dos partes, para cubrir ambos casos (referencia
+# de OTRO expediente copiada por error, Y placeholder de plantilla sin rellenar) con
+# la misma lógica de sustitución de más abajo (cualquier match que no sea ya igual a
+# correct_reference se sustituye).
+REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-(?:\d{3,5}|[Xx]{3,5})_(?:\d{2}|[Xx]{2})")
 
 SOLICITUDES_SHEET = "SOLICITUDES"
 
