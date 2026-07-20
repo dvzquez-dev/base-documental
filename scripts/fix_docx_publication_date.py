@@ -33,9 +33,16 @@ las mismas que usa el FIX B de check_pipeline_status.py):
      ejemplo. Es una detección por PATRÓN (regex), no una lista cerrada de valores
      conocidos — puede no encontrar nada si la cabecera no sigue ese formato exacto
      (mismo tipo de limitación que el placeholder de fecha: no falla, simplemente no
-     encuentra nada que corregir), y en textos partidos por Word en varias runs de
-     XML tras ediciones manuales previas tampoco lo detectará (limitación conocida y
-     aceptada, igual que con la fecha).
+     encuentra nada que corregir).
+  2b-bis. AÑADIDO 2026-07-20 (FIX F, bug real confirmado en 79E115DB): la limitación
+     de "texto partido en varias runs de Word" mencionada arriba dejó de ser teórica
+     — es justo lo que le pasaba a este expediente (el placeholder "XXXX" llevaba un
+     resaltado propio, así que Word lo guardó en una run de XML aparte). Ahora, si la
+     sustitución simple no encuentra nada pero el texto reconstruido de verdad (unir
+     todos los <w:t> de un párrafo, como lo ve Word al renderizar) demuestra que la
+     referencia sigue mal, se aplica un segundo intento (_patch_reference_split_runs)
+     que localiza el match en ese texto reconstruido y edita solo el contenido de las
+     runs afectadas, sin tocar formato ni el resto del documento.
   2c. AÑADIDO 2026-07-20 (causa raíz real diagnosticada tras el caso 79E115DB): el
      GATE OBLIGATORIO DE REFERENCIA de Cowork ("05_publicar_aprobado" v10) corta la
      publicación ANTES de crear la carpeta de Drive del expediente, así que un
@@ -82,6 +89,7 @@ import sys
 import tempfile
 import zipfile
 from datetime import datetime, timezone
+from xml.etree import ElementTree as ET
 
 try:
     from zoneinfo import ZoneInfo
@@ -130,6 +138,34 @@ PDF_MIME = "application/pdf"
 # la misma lógica de sustitución de más abajo (cualquier match que no sea ya igual a
 # correct_reference se sustituye).
 REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-(?:\d{3,5}|[Xx]{3,5})_(?:\d{2}|[Xx]{2})")
+
+# AÑADIDO 2026-07-20 (segundo bug real detectado en el caso 79E115DB, DESPUÉS de
+# ampliar REFERENCE_PATTERN arriba): con el patrón ya ampliado, el Action volvió a
+# correr, corrigió la fecha, pero la referencia SEGUÍA sin corregirse — confirmado
+# descargando el PDF resultante y viendo "Informe_S-XXXX_XX" intacto en cabecera/pie.
+# Causa: patch_docx_reference (más abajo) hace un regex.sub sobre el TEXTO CRUDO del
+# XML de header/footer. Si Word partió el placeholder en varias runs (<w:r><w:t>...
+# </w:t></w:r>) — típico cuando las "XXXX" llevan un resaltado/color distinto al
+# resto del texto, para que destaque visualmente como placeholder —, entre
+# "Informe_S-" y "XXXX_XX" en el XML crudo hay tags de cierre/apertura de run
+# (</w:t></w:r><w:r>...<w:t>), así que el regex sobre texto crudo nunca hace match
+# aunque visualmente (y para cualquiera que abra el documento) sea una sola cadena
+# continua. Ya estaba anticipado como limitación conocida en el docstring de
+# patch_docx_reference, pero nunca se había confirmado en un caso real hasta ahora.
+# Solución: _reference_still_present + _patch_reference_split_runs (ambas abajo)
+# reconstruyen el texto real concatenando los <w:t> de cada párrafo (<w:p>) — igual
+# que lo vería Word al renderizar — y si encuentran ahí una referencia sin corregir
+# que el regex simple no pudo tocar, editan solo el contenido de los <w:t> afectados
+# (splice quirúrgico dentro del árbol XML ya parseado), dejando intactas todas las
+# demás runs, tags y atributos de formato (rPr, resaltado, etc.). Es un fallback:
+# SOLO se activa cuando la sustitución simple no encontró nada pero el texto
+# reconstruido demuestra que sigue mal — así el caso simple (una sola run, el que ya
+# funcionaba en VAXBFDH/A7F4NFG/UAWUVW7) sigue resolviéndose exactamente igual que
+# antes, sin cambiar su comportamiento ya probado en producción.
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ET.register_namespace("w", _W_NS)
+_T_TAG = f"{{{_W_NS}}}t"
+_P_TAG = f"{{{_W_NS}}}p"
 
 SOLICITUDES_SHEET = "SOLICITUDES"
 
@@ -369,15 +405,96 @@ def patch_docx_publication_date(docx_bytes, new_date):
     return out_buf.getvalue(), changed
 
 
+def _reference_still_present(xml_bytes, correct_reference):
+    """AÑADIDO 2026-07-20 (FIX F). Reconstruye el texto real de un header/footer.xml
+    concatenando todos los <w:t> (así es como lo ve Word al renderizar, sin importar
+    en cuántas runs esté partido) y comprueba si sigue habiendo una referencia sin
+    corregir aunque el regex simple sobre el XML crudo no encontrara nada."""
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return False
+    full_text = "".join(t.text or "" for t in root.iter(_T_TAG))
+    for m in REFERENCE_PATTERN.finditer(full_text):
+        if m.group(0) != correct_reference:
+            return True
+    return False
+
+
+def _patch_reference_split_runs(xml_bytes, correct_reference):
+    """AÑADIDO 2026-07-20 (FIX F, caso real 79E115DB). Fallback de patch_docx_reference
+    para cuando la referencia está partida en varias runs de Word (típico cuando el
+    placeholder "XXXX" lleva un resaltado/formato distinto al resto del texto). Opera
+    sobre el texto reconstruido de cada párrafo (<w:p>) en vez de sobre el XML crudo:
+    localiza el match en el texto concatenado, y hace un splice quirúrgico solo en el
+    contenido de los <w:t> afectados (el primero recibe el prefijo real + la
+    referencia correcta, el último conserva su sufijo real, los intermedios quedan
+    vacíos) — nunca toca tags, atributos ni runs no afectadas. Devuelve (nuevos_bytes,
+    cambiado, referencias_encontradas). Probado con casos de referencia partida en 2 y
+    3 runs, con prefijo/sufijo de texto real alrededor, e idempotencia (correrlo dos
+    veces sobre un resultado ya corregido no vuelve a tocar nada)."""
+    changed = False
+    encontradas = set()
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return xml_bytes, False, []
+
+    for p in root.iter(_P_TAG):
+        t_elems = list(p.iter(_T_TAG))
+        if not t_elems:
+            continue
+        texts = [t.text or "" for t in t_elems]
+        full_text = "".join(texts)
+        matches = list(REFERENCE_PATTERN.finditer(full_text))
+        if not matches:
+            continue
+
+        offsets = []
+        pos = 0
+        for t, txt in zip(t_elems, texts):
+            offsets.append((pos, pos + len(txt), t))
+            pos += len(txt)
+
+        for m in reversed(matches):
+            found_text = m.group(0)
+            if found_text == correct_reference:
+                continue
+            start, end = m.start(), m.end()
+            affected = [(a, b, t) for (a, b, t) in offsets if b > start and a < end]
+            if not affected:
+                continue
+            encontradas.add(found_text)
+            first_a, _, first_t = affected[0]
+            last_a, _, last_t = affected[-1]
+            prefix = (first_t.text or "")[: max(0, start - first_a)]
+            suffix = (last_t.text or "")[max(0, end - last_a):]
+            if first_t is last_t:
+                first_t.text = prefix + correct_reference + suffix
+            else:
+                first_t.text = prefix + correct_reference
+                last_t.text = suffix
+                for (_, _, t) in affected[1:-1]:
+                    t.text = ""
+            changed = True
+
+    if not changed:
+        return xml_bytes, False, []
+    new_xml = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + ET.tostring(root, encoding="utf-8")
+    return new_xml, True, sorted(encontradas)
+
+
 def patch_docx_reference(docx_bytes, correct_reference):
-    """AÑADIDO 2026-07-13. Busca en CUALQUIER header*.xml/footer*.xml del documento
-    texto con forma de referencia documental (REFERENCE_PATTERN) que no coincida con
-    correct_reference, y lo sustituye. Devuelve (nuevo_docx_bytes, cambiado,
-    referencias_incorrectas_encontradas). No toca el cuerpo del documento ni ningún
-    otro contenido. Detección por patrón, no por lista cerrada: si la cabecera no
-    sigue ese formato exacto, o el texto está partido en varias runs de XML por
-    ediciones previas de Word, simplemente no encontrará nada que corregir (mismo
-    tipo de limitación ya conocida y aceptada para el placeholder de fecha)."""
+    """AÑADIDO 2026-07-13, AMPLIADO 2026-07-20 (FIX F). Busca en CUALQUIER
+    header*.xml/footer*.xml del documento texto con forma de referencia documental
+    (REFERENCE_PATTERN) que no coincida con correct_reference, y lo sustituye.
+    Devuelve (nuevo_docx_bytes, cambiado, referencias_incorrectas_encontradas). No
+    toca el cuerpo del documento ni ningún otro contenido. Primero intenta la
+    sustitución simple sobre el XML crudo (camino ya probado en producción con
+    VAXBFDH/A7F4NFG/UAWUVW7); si no encuentra nada pero el texto reconstruido
+    (uniendo los <w:t> de verdad) demuestra que la referencia sigue mal, cae al
+    fallback paragraph-aware (_patch_reference_split_runs) que sí sabe corregirla
+    aunque esté partida en varias runs de Word."""
     zin = zipfile.ZipFile(io.BytesIO(docx_bytes), "r")
     changed = False
     encontradas = set()
@@ -400,6 +517,12 @@ def patch_docx_reference(docx_bytes, correct_reference):
                 new_text = REFERENCE_PATTERN.sub(_reemplazar, text)
                 if new_text != text:
                     data = new_text.encode("utf-8")
+                elif _reference_still_present(data, correct_reference):
+                    new_data, split_changed, split_found = _patch_reference_split_runs(data, correct_reference)
+                    if split_changed:
+                        data = new_data
+                        changed = True
+                        encontradas.update(split_found)
             zout.writestr(item, data)
 
     return out_buf.getvalue(), changed, sorted(encontradas)
