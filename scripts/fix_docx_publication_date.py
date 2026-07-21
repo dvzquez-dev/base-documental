@@ -440,6 +440,123 @@ def actualizar_folder_id(sheets, header, row_number, folder_id, folder_url):
 
 
 # --------------------------------------------------------------------------------------
+# AÑADIDO 2026-07-21 (FIX G — gap estructural real, campo "Revisor/es"): el pipeline
+# ya tenía documentado en CONFIG.REVISOR_FIELD_KNOWN_PATTERNS una "lista creciente" de
+# patrones para localizar el placeholder de revisor/es en cabecera/pie (p.ej.
+# "Revisor/es: ---- "), pensada para ampliarse igual que se hizo con REFERENCE_PATTERN
+# más arriba (02_analisis_documento diagnostica un patrón nuevo cuando no reconoce el
+# formato de una plantilla, y lo añade a esa lista en CONFIG). Pero nunca se había
+# escrito el código que la USA — ni aquí ni en ningún otro script del pipeline. El
+# caso 79E115DB fue el primero donde se notó de verdad: el revisor aprobó "con
+# anotaciones" pidiendo explícitamente que se rellenara el campo, y no había ningún
+# mecanismo automático que lo hiciera — un problema "diseñado en el papel, nunca
+# construido", a caballo entre el esquema de SOLICITUDES (faltaban columnas) y este
+# script (faltaba la función).
+#
+# Esta sección añade la pieza que faltaba:
+#   - CONFIG_SHEET + leer_config_revisor_patterns(): lee la lista de patrones vigente
+#     desde CONFIG (misma tabla key/value/notes que ya usa el resto del pipeline),
+#     compilándolos como regex. Si la clave no existe, el valor no parsea como JSON, o
+#     la lista sale vacía, cae a REVISOR_PATTERN_FALLBACK (el mismo patrón que ya
+#     había en CONFIG a fecha de hoy) para no dejar el Action ciego si la celda se
+#     borra por error.
+#   - patch_docx_revisor(): mismo estilo que patch_docx_reference — recorre
+#     header*.xml/footer*.xml, busca el primer patrón que haga match, y sustituye el
+#     match COMPLETO por el texto final ya armado (p.ej. "Revisor/es: Daniel Vázquez
+#     Piñeiro"). No reconstruye texto multi-run como _patch_reference_surgical porque
+#     el caso real confirmado (79E115DB, word/footer2.xml) tiene el placeholder en una
+#     única run de texto — si en el futuro aparece un caso partido en varias runs, se
+#     puede extender con la misma técnica ya probada arriba para la referencia.
+#   - En SOLICITUDES: dos columnas nuevas, revisor_field_pendiente (TRUE/FALSE) y
+#     revisor_field_valor (texto completo de sustitución ya armado — lo arma quien
+#     marca la fila, sea el flujo 4bis de Cowork o una edición manual). Una fila entra
+#     en "candidatas" (ver main()) si tiene bloqueo estructural conocido O
+#     revisor_field_pendiente=TRUE (antes solo lo primero: una fila ya resuelta de
+#     fecha/referencia pero con el revisor todavía pendiente nunca se habría vuelto a
+#     recoger). Al terminar con éxito, revisor_field_pendiente se limpia a FALSE, igual
+#     que last_error se sobrescribe con la nota RESUELTO_AUTOMATICO_....
+# --------------------------------------------------------------------------------------
+
+CONFIG_SHEET = "CONFIG"
+
+REVISOR_PATTERN_FALLBACK = (r"Revisor(?:/es|es)?:\s*[^<]{0,150}",)
+
+
+def leer_config_revisor_patterns(sheets):
+    """Lee CONFIG (columnas key/value/notes) buscando la fila cuya key sea
+    REVISOR_FIELD_KNOWN_PATTERNS, espera un JSON array de strings-regex en su value,
+    y devuelve la lista ya compilada. Si no encuentra la clave, el valor no parsea
+    como JSON, o la lista sale vacía, cae a REVISOR_PATTERN_FALLBACK para no dejar el
+    Action sin capacidad de corregir nada si la celda se borra por error."""
+    try:
+        resp = sheets.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID, range=f"{CONFIG_SHEET}!A1:B200"
+        ).execute()
+        values = resp.get("values", [])
+        raw_value = None
+        for row in values[1:]:
+            if row and row[0].strip() == "REVISOR_FIELD_KNOWN_PATTERNS":
+                raw_value = row[1] if len(row) > 1 else None
+                break
+        if raw_value:
+            patrones = json.loads(raw_value)
+            if isinstance(patrones, list) and patrones:
+                return [re.compile(p) for p in patrones]
+    except Exception as exc:  # noqa: BLE001 — un CONFIG mal formado no debe tumbar el Action
+        print(f"WARN: no se pudo leer REVISOR_FIELD_KNOWN_PATTERNS de CONFIG ({exc}); usando fallback.", file=sys.stderr)
+    return [re.compile(p) for p in REVISOR_PATTERN_FALLBACK]
+
+
+def patch_docx_revisor(docx_bytes, revisor_text, patterns):
+    """Busca en CUALQUIER header*.xml/footer*.xml el primer patrón (de patterns, en
+    orden) que haga match, y sustituye el match COMPLETO por revisor_text (la
+    sustitución ya viene armada entera, p.ej. 'Revisor/es: Daniel Vázquez Piñeiro' —
+    no solo el nombre). Idempotente: si el texto ya encontrado es igual a
+    revisor_text, no cuenta como cambio (permite reintentos sin duplicar). Devuelve
+    (nuevo_docx_bytes, cambiado, patron_usado_o_None). No toca el cuerpo del
+    documento ni ningún otro contenido."""
+    zin = zipfile.ZipFile(io.BytesIO(docx_bytes), "r")
+    changed = False
+    matched_pattern = None
+    out_buf = io.BytesIO()
+
+    with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if re.match(r"word/(header|footer)\d*\.xml$", item.filename):
+                text = data.decode("utf-8")
+                for pat in patterns:
+                    m = pat.search(text)
+                    if m:
+                        current = m.group(0)
+                        if current.strip() == revisor_text.strip():
+                            break
+                        text = text[: m.start()] + revisor_text + text[m.end():]
+                        changed = True
+                        matched_pattern = pat.pattern
+                        break
+                data = text.encode("utf-8")
+            zout.writestr(item, data)
+
+    return out_buf.getvalue(), changed, matched_pattern
+
+
+def actualizar_revisor_field_pendiente(sheets, header, row_number, pendiente_value):
+    """Escribe revisor_field_pendiente (TRUE/FALSE) de una fila concreta. Si la
+    columna todavía no existe en SOLICITUDES (despliegue anterior a FIX G), no hace
+    nada — evita un ValueError por columna no encontrada en vez de tumbar el Action."""
+    if "revisor_field_pendiente" not in header:
+        return
+    idx = header.index("revisor_field_pendiente")
+    sheets.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{SOLICITUDES_SHEET}!{col_letter(idx)}{row_number}",
+        valueInputOption="RAW",
+        body={"values": [[pendiente_value]]},
+    ).execute()
+
+
+# --------------------------------------------------------------------------------------
 # Drive — descarga, parcheo del DOCX, conversión a PDF, subida.
 #
 # IMPORTANTE (2026-07-13, tras varias ejecuciones reales fallando con 404 solo en
@@ -572,15 +689,28 @@ def main():
     # viene vacío en alguna candidata (ver resolver_carpeta_ruta más abajo).
     rutas = leer_rutas(sheets)
 
+    # AÑADIDO 2026-07-21 (FIX G): se lee una sola vez, se usa para patch_docx_revisor
+    # en cada candidata que tenga revisor_field_pendiente=TRUE (ver más abajo).
+    revisor_patterns = leer_config_revisor_patterns(sheets)
+
+    # AMPLIADO 2026-07-21 (FIX G): antes solo entraban filas con marca de bloqueo
+    # estructural en last_error. Eso dejaba fuera para siempre una fila ya resuelta de
+    # fecha/referencia (last_error reescrito a RESUELTO_AUTOMATICO_...) pero con el
+    # campo Revisor/es todavía pendiente de rellenar — nunca se habría vuelto a
+    # recoger. Ahora también entra cualquier fila con revisor_field_pendiente=TRUE,
+    # independientemente de lo que diga last_error.
     candidatas = [
         r for r in filas
         if es_true(r.get("approved"))
         and not es_true(r.get("closed"))
-        and tiene_marca_bloqueo_estructural(r.get("last_error", ""))
+        and (
+            tiene_marca_bloqueo_estructural(r.get("last_error", ""))
+            or es_true(r.get("revisor_field_pendiente"))
+        )
     ]
 
     if not candidatas:
-        print("No hay expedientes aprobados-no-cerrados con bloqueo estructural conocido. Nada que hacer.")
+        print("No hay expedientes aprobados-no-cerrados con bloqueo estructural conocido ni con revisor pendiente. Nada que hacer.")
         return
 
     fixed = []
@@ -632,8 +762,24 @@ def main():
             # sobre el resultado del parcheo de fecha (encadenado, no en paralelo)
             # para que ambas correcciones convivan en el mismo DOCX final.
             ref_bytes, changed_ref, referencias_incorrectas = patch_docx_reference(fecha_bytes, reference)
-            new_bytes = ref_bytes
-            changed = changed_fecha or changed_ref
+
+            # AÑADIDO 2026-07-21 (FIX G): igual que la referencia, se aplica encadenado
+            # sobre el resultado anterior (no en paralelo), y solo si esta fila viene
+            # marcada como revisor_field_pendiente=TRUE con un revisor_field_valor no
+            # vacío ya armado (p.ej. "Revisor/es: Daniel Vázquez Piñeiro").
+            revisor_pendiente = es_true(row.get("revisor_field_pendiente"))
+            revisor_valor = (row.get("revisor_field_valor") or "").strip()
+            changed_revisor = False
+            if revisor_pendiente and revisor_valor:
+                revisor_bytes, changed_revisor, revisor_patron_usado = patch_docx_revisor(
+                    ref_bytes, revisor_valor, revisor_patterns
+                )
+            else:
+                revisor_bytes = ref_bytes
+                revisor_patron_usado = None
+
+            new_bytes = revisor_bytes
+            changed = changed_fecha or changed_ref or changed_revisor
 
             # IMPORTANTE (corregido 2026-07-13, tras primeras ejecuciones reales en Actions):
             # NO saltar el expediente solo porque este DOCX en concreto no tenga el
@@ -653,6 +799,20 @@ def main():
                 notas_parciales.append(
                     f"referencia corregida en cabecera/pie ({', '.join(referencias_incorrectas)} -> {reference})"
                 )
+            # AÑADIDO 2026-07-21 (FIX G): registra el resultado del parcheo de revisor
+            # en las tres situaciones posibles — no aplicaba, aplicó con éxito, o
+            # estaba pendiente pero ningún patrón conocido hizo match (caso que sí
+            # necesita revisión manual, a diferencia de "sin campo que corregir").
+            if revisor_pendiente and revisor_valor:
+                if changed_revisor:
+                    notas_parciales.append(
+                        f"campo Revisor/es corregido en cabecera/pie (patron '{revisor_patron_usado}' -> \"{revisor_valor}\")"
+                    )
+                else:
+                    notas_parciales.append(
+                        "revisor_field_pendiente=TRUE pero ningun patron de CONFIG.REVISOR_FIELD_KNOWN_PATTERNS "
+                        "hizo match en cabecera/pie de este DOCX (revision manual necesaria, posible plantilla nueva)"
+                    )
 
             if changed:
                 print(f"[{request_id}] subiendo DOCX corregido al mismo fileId ({docx_file_id}) ...")
@@ -662,7 +822,10 @@ def main():
             else:
                 print(f"[{request_id}] ni placeholder de fecha ni referencia incorrecta encontrados en este DOCX — no se resube el DOCX, se continua igualmente con la generacion del PDF.")
                 docx_bytes_for_pdf = original_bytes
-                fecha_nota = "sin campo de fecha de publicacion ni referencia que corregir en este DOCX, "
+                if notas_parciales:
+                    fecha_nota = ", ".join(notas_parciales) + ", "
+                else:
+                    fecha_nota = "sin campo de fecha de publicacion ni referencia que corregir en este DOCX, "
 
             with tempfile.TemporaryDirectory() as workdir:
                 print(f"[{request_id}] convirtiendo a PDF con LibreOffice ...")
@@ -677,6 +840,15 @@ def main():
                 f"{fecha_nota}PDF generado y subido (fileId {pdf_file_id})."
             )
             actualizar_last_error_y_updated_at(sheets, header, row["_row_number"], resolved_note, now_iso())
+
+            # AÑADIDO 2026-07-21 (FIX G): si el revisor SÍ estaba pendiente y SÍ se
+            # corrigió, se limpia el flag para que esta fila no se vuelva a recoger en
+            # la siguiente corrida solo por este motivo. Si estaba pendiente pero no
+            # se encontró ningún patrón (revision manual necesaria), se deja el flag
+            # en TRUE a propósito — así la fila sigue apareciendo como candidata en
+            # cada corrida hasta que alguien lo resuelva a mano o amplíe CONFIG.
+            if revisor_pendiente and revisor_valor and changed_revisor:
+                actualizar_revisor_field_pendiente(sheets, header, row["_row_number"], "FALSE")
 
             fixed.append((request_id, pdf_file_id))
             print(f"[{request_id}] OK.")
