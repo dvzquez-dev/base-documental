@@ -475,6 +475,21 @@ def actualizar_folder_id(sheets, header, row_number, folder_id, folder_url):
 #     fecha/referencia pero con el revisor todavía pendiente nunca se habría vuelto a
 #     recoger). Al terminar con éxito, revisor_field_pendiente se limpia a FALSE, igual
 #     que last_error se sobrescribe con la nota RESUELTO_AUTOMATICO_....
+#
+# NOTA 2026-07-21 noche (revertido tras feedback directo de Daniel): esa misma noche
+# se intentó, en dos pasadas sucesivas, mover a este script la decisión de "¿el nuevo
+# revisor ya está representado con un nombre distinto/incompleto/con errata?" (primero
+# con coincidencia exacta de palabras + fusión automática, después añadiendo encima un
+# umbral de similitud de difflib para detectar erratas). Daniel recordó que esa
+# decisión YA estaba correctamente diseñada — desde el 2026-07-14 — para vivir en
+# Cowork, no aquí: ver "04_procesar_respuesta_revisor" v5, Paso 4.d/4.e, donde Cowork
+# ya usa JUICIO real (no comparación literal ni un umbral fijo) para decidir si el
+# aprobador ya está representado en el campo, combina los nombres, y calcula la
+# etiqueta correcta ('Revisor: '/'Revisores: ') ANTES de escribir revisor_field_valor.
+# Ambos intentos se revirtieron por completo — patch_docx_revisor() vuelve a ser pura
+# sustitución mecánica del match encontrado por revisor_field_valor, sin parsear ni
+# combinar nombres aquí. Ver "04_procesar_respuesta_revisor" v6 para el refuerzo
+# explícito de este reparto de responsabilidades tras este mismo incidente.
 # --------------------------------------------------------------------------------------
 
 CONFIG_SHEET = "CONFIG"
@@ -507,12 +522,29 @@ def leer_config_revisor_patterns(sheets):
     return [re.compile(p) for p in REVISOR_PATTERN_FALLBACK]
 
 
-def patch_docx_revisor(docx_bytes, revisor_text, patterns):
-    """Busca en CUALQUIER header*.xml/footer*.xml el primer patrón (de patterns, en
-    orden) que haga match, y sustituye el match COMPLETO por revisor_text (la
-    sustitución ya viene armada entera, p.ej. 'Revisor/es: Daniel Vázquez Piñeiro' —
-    no solo el nombre). Idempotente: si el texto ya encontrado es igual a
-    revisor_text, no cuenta como cambio (permite reintentos sin duplicar). Devuelve
+def patch_docx_revisor(docx_bytes, revisor_field_valor, patterns):
+    """CORREGIDO 2026-07-21 noche (revertido tras feedback directo de Daniel: en una
+    sesión anterior ya se había diseñado — y quedó documentado en
+    "04_procesar_respuesta_revisor" v5, Paso 4.d/4.e — que la decisión de "¿es la
+    misma persona con una variante/errata de nombre, o alguien distinto?" y el
+    cálculo de la etiqueta correcta ('Revisor: ' vs 'Revisores: ') las hace Cowork
+    con JUICIO REAL en el momento de procesar la respuesta del revisor, ANTES de
+    escribir revisor_field_valor — no este script. Este mismo fix había intentado
+    (más temprano en esta sesión) reimplementar esa misma decisión aquí dentro con
+    funciones tipo combinar_revisor()/_mismo_revisor() y, después, con un umbral de
+    similitud de difflib — ambos intentos duplicaban/contradecían un diseño que ya
+    existía y que delega correctamente esa ambigüedad a la IA en el flujo de la
+    tarea, en vez de a una heurística fija en Python. Se revierte por completo: este
+    script vuelve a ser una sustitución MECÁNICA y determinista, igual que
+    patch_docx_reference — busca en CUALQUIER header*.xml/footer*.xml el primer
+    patrón (de patterns, en orden) que haga match con el campo de revisor/es
+    existente (sea cual sea su contenido: vacío, un nombre, varios nombres, o un
+    placeholder de cualquier tipo — no se interpreta, solo se localiza por regex), y
+    sustituye el match COMPLETO por revisor_field_valor tal cual llega desde
+    SOLICITUDES (el texto final completo, ya con el nombre/lista de nombres
+    correctamente combinada y la etiqueta 'Revisor: '/'Revisores: ' ya decidida por
+    Cowork en el Paso 4 — ver 04_procesar_respuesta_revisor v5/v6). Idempotente: si
+    el texto ya es idéntico a revisor_field_valor, no cuenta como cambio. Devuelve
     (nuevo_docx_bytes, cambiado, patron_usado_o_None). No toca el cuerpo del
     documento ni ningún otro contenido."""
     zin = zipfile.ZipFile(io.BytesIO(docx_bytes), "r")
@@ -528,10 +560,10 @@ def patch_docx_revisor(docx_bytes, revisor_text, patterns):
                 for pat in patterns:
                     m = pat.search(text)
                     if m:
-                        current = m.group(0)
-                        if current.strip() == revisor_text.strip():
+                        actual = m.group(0)
+                        if actual.strip() == revisor_field_valor.strip():
                             break
-                        text = text[: m.start()] + revisor_text + text[m.end():]
+                        text = text[: m.start()] + revisor_field_valor + text[m.end():]
                         changed = True
                         matched_pattern = pat.pattern
                         break
@@ -554,6 +586,14 @@ def actualizar_revisor_field_pendiente(sheets, header, row_number, pendiente_val
         valueInputOption="RAW",
         body={"values": [[pendiente_value]]},
     ).execute()
+
+
+# NOTA 2026-07-21 noche: las columnas SOLICITUDES.revisor_posible_duplicado_pendiente
+# y revisor_posible_duplicado_detalle (añadidas en Sheets esa misma noche, columnas
+# DK/DL) quedaron SIN USO tras revertir este fix a sustitución mecánica pura — no se
+# borraron de la Sheet (evitar más cirugía de columnas la misma noche que ya tiene el
+# problema de duplicados CV/CW vs DG/DH sin resolver), pero este script no las escribe
+# ni las lee. Si en el futuro se decide reutilizarlas para otra cosa, están libres.
 
 
 # --------------------------------------------------------------------------------------
