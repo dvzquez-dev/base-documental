@@ -62,6 +62,26 @@ que de verdad tienen trabajo. El Paso 4 (requiere Gmail) y el Paso 8 (solo se
 dispara reactivamente cuando otro paso falla, no tiene condición propia) no
 se pueden determinar aquí con certeza — ver arriba.
 
+CAMBIO 2026-07-22 (integración app-panel, contrato v1 "contrato-integracion-cowork.md"):
+nueva señal pasos_necesarios.verificar_app_decisiones. La app-panel Solaris sustituye
+el correo de aprobación: el revisor decide en la app y este script hace el polling
+frecuente de getEntregables (acción del backend Apps Script de la app) para detectar
+decisiones (aprobado/anot/cambios/rechazado) que SOLICITUDES todavía no refleja.
+Detección DETERMINISTA y sin estado extra: una decisión está "pendiente de procesar
+por Cowork" si el entregable trae decision.accion pero la fila activa de SOLICITUDES
+para esa reference no tiene aún el booleano correspondiente (approved /
+changes_requested / rejected) en TRUE. Cuando Cowork procesa la decisión y escribe el
+booleano, la condición desaparece sola — sin archivos de estado adicionales, misma
+filosofía que el resto de pasos_necesarios. verificar_app_decisiones SÍ cuenta como
+paso core (fuerza COMPLETA): actuar sobre una decisión es trabajo real de pipeline
+(publicar, o avisar al autor + re-empujar estado), no una mera verificación barata.
+Credenciales: URL desde CONFIG.APP_PUSH_URL (o env APP_PUSH_URL); key desde la env
+COWORK_KEY (secret de GitHub Actions de este repo — NUNCA committeada), con fallback
+a CONFIG.APP_PUSH_KEY. Si faltan ambas, la señal se omite con un aviso (integración
+aún no encendida). Si están y el fetch FALLA, se registra en lecturas_fallidas
+(fuerza COMPLETA) — misma regla que las demás lecturas críticas: un error de red
+nunca se convierte en un falso "todo tranquilo".
+
 Requiere la misma variable de entorno GDRIVE_SA_KEY (JSON de la service
 account) que ya usa publish_temp_pdfs.py.
 """
@@ -72,6 +92,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 from google.oauth2 import service_account
@@ -125,7 +147,24 @@ MIN_MINUTOS_ANTES_DE_VERIFICAR_GMAIL_PASO4 = 10
 SEÑALES_SOLO_SEGUIMIENTO = {"seguimiento_envios_pendiente", "log_envio_ia_pendiente"}
 
 
-PASOS_CORE = ("1", "2", "3", "5", "6", "7")  # pasos "de pipeline" de verdad; 4_verificar_gmail NO cuenta como core
+# Pasos "de pipeline" de verdad; 4_verificar_gmail y revisor_field_diagnostico NO cuentan
+# como core. CAMBIO 2026-07-22: verificar_app_decisiones SÍ es core — una decisión tomada
+# en la app exige trabajo real (publicar si aprobado/anot, avisar al autor + actualizar
+# SOLICITUDES + re-empujar estado si cambios/rechazado), y la latencia importa: es
+# exactamente el cuello de botella que la integración con la app vino a matar.
+PASOS_CORE = ("1", "2", "3", "5", "6", "7", "verificar_app_decisiones")
+
+# Mapeo decisión-de-la-app → columna booleana de SOLICITUDES que Cowork escribe al
+# procesarla (contrato v1, §5 y §7). "anot" = aprobado con anotaciones — misma columna
+# approved (SOLICITUDES no distingue anot en booleano; los ajustes van en las columnas
+# de anotaciones del revisor).
+DECISION_APP_A_COLUMNA = {
+    "aprobado": "approved",
+    "anot": "approved",
+    "cambios": "changes_requested",
+    "rechazado": "rejected",
+}
+APP_GETENTREGABLES_TIMEOUT_S = 30
 
 
 def calcular_nivel_pasada(señales, lecturas_fallidas, pasos_necesarios):
@@ -148,8 +187,9 @@ def calcular_nivel_pasada(señales, lecturas_fallidas, pasos_necesarios):
     Reglas (en este orden):
     1. Si alguna lectura falló de verdad (no sabemos su valor real), nunca nos
        fiamos de un patrón que parezca "solo seguimiento" — forzamos COMPLETA.
-    2. Si hay algún paso CORE (1,2,3,5,6,7) con trabajo detectado, es COMPLETA
-       (Cowork usa pasos_necesarios para leer solo esos pasos, no todos).
+    2. Si hay algún paso CORE (1,2,3,5,6,7 y, desde 2026-07-22,
+       verificar_app_decisiones — ver PASOS_CORE) con trabajo detectado, es
+       COMPLETA (Cowork usa pasos_necesarios para leer solo esos pasos, no todos).
     3. Si no hay ningún paso core pendiente, y ninguna señal ni 4_verificar_gmail
        están activos, NINGUNA.
     4. Si no hay ningún paso core pendiente, y las únicas señales activas están
@@ -407,6 +447,43 @@ def publish_result(sheets, result):
     rotate_status_url(sheets, result)
 
 
+def leer_decisiones_app(config):
+    """Lee getEntregables del backend Apps Script de la app-panel (contrato v1, §7).
+
+    AÑADIDO 2026-07-22 (integración app-panel). Devuelve:
+    - None si la integración no está configurada todavía (falta URL o key) — se
+      omite la señal con un aviso, sin tratarlo como error.
+    - La lista de entregables (posiblemente vacía) si la lectura funcionó.
+    - Lanza excepción si la integración ESTÁ configurada pero la lectura falló
+      (red, key inválida, ok=false) — el llamante la registra en lecturas_fallidas
+      para forzar COMPLETA, igual que cualquier otra lectura crítica fallida.
+
+    La key viene de la variable de entorno COWORK_KEY (secret de GitHub Actions,
+    nunca committeada), con fallback a CONFIG.APP_PUSH_KEY. La URL, de
+    CONFIG.APP_PUSH_URL (con fallback a la env APP_PUSH_URL)."""
+    url = str(config.get("APP_PUSH_URL") or os.environ.get("APP_PUSH_URL") or "").strip()
+    key = str(os.environ.get("COWORK_KEY") or config.get("APP_PUSH_KEY") or "").strip()
+    if not url or not key:
+        print(
+            "Aviso: integración app-panel no configurada (falta APP_PUSH_URL o COWORK_KEY) — "
+            "se omite verificar_app_decisiones.",
+            file=sys.stderr,
+        )
+        return None
+    params = urllib.parse.urlencode({"action": "getEntregables", "key": key})
+    req = urllib.request.Request(f"{url}?{params}", method="GET")
+    with urllib.request.urlopen(req, timeout=APP_GETENTREGABLES_TIMEOUT_S) as resp:
+        payload = json.load(resp)
+    if not payload.get("ok"):
+        raise RuntimeError(f"getEntregables devolvió ok=false: {payload.get('error')!r}")
+    data = payload.get("data")
+    # Tolerancia de forma: el contrato dice que data es la lista, pero se acepta
+    # también un objeto contenedor por si el backend evoluciona.
+    if isinstance(data, dict):
+        data = data.get("entregables") or data.get("items") or []
+    return data if isinstance(data, list) else []
+
+
 def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, lecturas_fallidas, previous_state):
     """Calcula, de forma determinista y a partir del estado real en Sheets, qué
     pasos concretos del pipeline (1,2,3,5,6,7) tienen trabajo pendiente ahora
@@ -446,6 +523,7 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
     pasos = {
         "1": False, "2": False, "3": False, "4_verificar_gmail": False,
         "5": False, "6": False, "7": False, "revisor_field_diagnostico": False,
+        "verificar_app_decisiones": False,
     }
     detalle = {}
     bloqueos_conocidos_sin_cambios = []
@@ -657,6 +735,51 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
         # no forzamos el paso 1 a pendiente (evita falsos positivos por un fallo
         # puntual de acceso a la hoja externa del formulario), pero sí queda
         # registrado como aviso — no como lectura_fallida crítica.
+
+    # --- verificar_app_decisiones (AÑADIDO 2026-07-22, contrato app-panel v1) ---
+    # Determinista y sin estado: una decisión de la app está pendiente de procesar si
+    # el entregable trae decision.accion pero la fila ACTIVA de SOLICITUDES para esa
+    # reference no tiene aún el booleano correspondiente en TRUE. "Fila activa" = la de
+    # received_at más reciente entre las que comparten reference (las cadenas de
+    # sustitución reutilizan la misma reference en varias filas — caso real
+    # Informe_S-6009_26, 3 filas). Si la app decide y Cowork aún no escribió el
+    # booleano, la señal se activa; cuando Cowork lo procesa, se apaga sola.
+    # Nota deliberada: aprobado con approved=TRUE pero closed=FALSE NO se re-marca
+    # aquí — de la publicación pendiente ya se encarga el Paso 5, sin duplicar señal.
+    try:
+        entregables_app = leer_decisiones_app(config)
+    except Exception as exc:
+        print(f"ERROR: no se pudo leer getEntregables de la app-panel: {exc}", file=sys.stderr)
+        lecturas_fallidas.append("APP_GETENTREGABLES")
+        entregables_app = None
+    if entregables_app:
+        epoch = datetime.min.replace(tzinfo=timezone.utc)
+        fila_activa_por_ref = {}
+        for r in solicitudes:
+            ref = str(r.get("reference") or "").strip()
+            if not ref:
+                continue
+            actual = fila_activa_por_ref.get(ref)
+            if actual is None or (parse_iso(r.get("received_at")) or epoch) >= (parse_iso(actual.get("received_at")) or epoch):
+                fila_activa_por_ref[ref] = r
+        decisiones_pendientes = []
+        for ent in entregables_app:
+            decision = ent.get("decision") or {}
+            accion = str(decision.get("accion") or "").strip().lower()
+            columna = DECISION_APP_A_COLUMNA.get(accion)
+            if not columna:
+                continue  # sin decisión (revision/publicando/publicado) o acción desconocida
+            ref = str(ent.get("ref") or "").strip()
+            fila = fila_activa_por_ref.get(ref)
+            if fila is None or not es_true(fila.get(columna)):
+                decisiones_pendientes.append(f"{ref} ({accion})")
+        if decisiones_pendientes:
+            pasos["verificar_app_decisiones"] = True
+            detalle["verificar_app_decisiones"] = (
+                f"{len(decisiones_pendientes)} decisión(es) tomadas en la app-panel sin reflejar "
+                f"todavía en SOLICITUDES: {', '.join(decisiones_pendientes[:10])}"
+                f"{'...' if len(decisiones_pendientes) > 10 else ''} — Cowork debe leer getEntregables y actuar"
+            )
 
     return pasos, detalle, bloqueos_conocidos_sin_cambios, nuevo_estado
 
