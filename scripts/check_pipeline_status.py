@@ -82,6 +82,29 @@ aún no encendida). Si están y el fetch FALLA, se registra en lecturas_fallidas
 (fuerza COMPLETA) — misma regla que las demás lecturas críticas: un error de red
 nunca se convierte en un falso "todo tranquilo".
 
+CAMBIO 2026-07-22 (bis — corrección de arquitectura, verificada empíricamente):
+Cowork NO tiene ningún camino de red hacia el backend de Apps Script — ni POST ni
+GET (su acceso HTTP es de allowlist y script.google.com no responde por ninguno de
+sus dos canales; probado en sesión el 2026-07-22: túnel 403 desde su sandbox y
+timeout desde su fetch). Por tanto TODO el tráfico con la app pasa por este script,
+en las dos direcciones — mismo patrón que COLA_PUBLICACION_TEMPORAL_PDF:
+- IDA (push): Cowork encola un PUNTERO en la pestaña COLA_PUSH_APP (request_id,
+  ref, estado_deseado, bloqueo opcional, estado=PENDIENTE) — nunca el payload
+  entero: las herramientas de Sheets de Cowork demostraron corromper valores
+  largos (evidencia real 2026-07-22: URL de CONFIG corrompida en tránsito), así
+  que el JSON del contrato NO viaja por celdas. Es este script quien construye el
+  entregable completo (construir_entregable) leyendo la fila real de SOLICITUDES —
+  la fuente de verdad — y normalizando analysis_json al esquema `analisis` del
+  contrato (normalizar_analisis). Luego POSTea a pushEntregable, marca
+  EMPUJADO/ERROR con la respuesta, y pone SOLICITUDES.pushed_to_app=TRUE.
+  Reintenta hasta MAX_PUSH_APP_ATTEMPTS antes de rendirse (ERROR_MAX_INTENTOS).
+- VUELTA (decisiones): además de la señal booleana verificar_app_decisiones, este
+  script embebe en pipeline_status.json la lista completa app_decisiones_pendientes
+  (ref, request_id, accion, revisor, motivo, ajustes, decidedAt) — todo lo que
+  Cowork necesita para actuar sin poder llamar a getEntregables él mismo.
+Consecuencia de seguridad: Cowork ya no necesita la key para nada; puede eliminarse
+CONFIG.APP_PUSH_KEY y dejarla SOLO como secret de GitHub Actions.
+
 Requiere la misma variable de entorno GDRIVE_SA_KEY (JSON de la service
 account) que ya usa publish_temp_pdfs.py.
 """
@@ -165,6 +188,12 @@ DECISION_APP_A_COLUMNA = {
     "rechazado": "rejected",
 }
 APP_GETENTREGABLES_TIMEOUT_S = 30
+APP_POST_TIMEOUT_S = 40
+COLA_PUSH_APP_SHEET = "COLA_PUSH_APP"  # cabeceras: request_id, ref, estado_deseado, bloqueo, estado, intentos, fecha_solicitado, fecha_empujado, respuesta
+MAX_PUSH_APP_ATTEMPTS = 5  # mismo espíritu que MAX_DRIVE_CLEANUP_ATTEMPTS
+# Estados que Cowork puede pedir empujar (contrato v1 §5) — NUNCA los de decisión
+# (aprobado/anot/cambios/rechazado), que son propiedad exclusiva de la app.
+ESTADOS_PUSH_PERMITIDOS = ("recibido", "analizado", "revision", "publicando", "publicado")
 
 
 def calcular_nivel_pasada(señales, lecturas_fallidas, pasos_necesarios):
@@ -447,6 +476,258 @@ def publish_result(sheets, result):
     rotate_status_url(sheets, result)
 
 
+def _app_credentials(config):
+    """(url, key) de la app-panel, o (None, None) si la integración no está configurada."""
+    url = str(config.get("APP_PUSH_URL") or os.environ.get("APP_PUSH_URL") or "").strip()
+    key = str(os.environ.get("COWORK_KEY") or config.get("APP_PUSH_KEY") or "").strip()
+    if not url or not key:
+        return None, None
+    return url, key
+
+
+def _update_cola_push_row(sheets, row_num, idx, **fields):
+    """Actualiza celdas sueltas de una fila de COLA_PUSH_APP por nombre de columna."""
+    data = []
+    for name, value in fields.items():
+        i = idx.get(name)
+        if i is None or value is None:
+            continue
+        data.append({"range": f"{COLA_PUSH_APP_SHEET}!{_col_letter(i)}{row_num}", "values": [[value]]})
+    if data:
+        sheets.spreadsheets().values().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={"valueInputOption": "RAW", "data": data},
+        ).execute()
+
+
+def marcar_pushed_to_app(sheets, request_id):
+    """Pone SOLICITUDES.pushed_to_app=TRUE para el request_id dado. Busca la columna
+    y la fila dinámicamente por cabecera, no asume posiciones. Best-effort: un fallo
+    aquí no debe tirar la corrida (el push ya se hizo; la marca se reintenta sola en
+    la siguiente corrida solo si la fila de la cola quedara en PENDIENTE, que no es
+    el caso — por eso se deja aviso claro en stderr si falla)."""
+    if not request_id:
+        return
+    try:
+        header_rows = get_values(sheets, "SOLICITUDES!A1:ZZ1")
+        header = [h.strip() for h in header_rows[0]] if header_rows else []
+        if "pushed_to_app" not in header or "request_id" not in header:
+            print("Aviso: SOLICITUDES no tiene columna pushed_to_app o request_id.", file=sys.stderr)
+            return
+        col_push = _col_letter(header.index("pushed_to_app"))
+        col_req = _col_letter(header.index("request_id"))
+        ids = get_values(sheets, f"SOLICITUDES!{col_req}2:{col_req}")
+        for i, row in enumerate(ids, start=2):
+            if row and str(row[0]).strip() == request_id:
+                sheets.spreadsheets().values().update(
+                    spreadsheetId=SPREADSHEET_ID,
+                    range=f"SOLICITUDES!{col_push}{i}",
+                    valueInputOption="RAW",
+                    body={"values": [["TRUE"]]},
+                ).execute()
+                return
+        print(f"Aviso: request_id {request_id} no encontrado en SOLICITUDES al marcar pushed_to_app.", file=sys.stderr)
+    except Exception as exc:
+        print(f"Aviso: no se pudo marcar pushed_to_app para {request_id}: {exc}", file=sys.stderr)
+
+
+def _parse_json_or_none(raw):
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _lista_de_strings(value):
+    """Devuelve value solo si es una lista no vacía de strings; si no, None.
+    Evita mandar a la app contadores o estructuras que no son listas reales
+    (caso real: en las Actas, actions/pending/risks existen solo como NÚMEROS
+    dentro de results, no como listas de texto — no deben inventarse)."""
+    if isinstance(value, list) and value and all(isinstance(x, str) for x in value):
+        return value
+    return None
+
+
+def normalizar_analisis(analysis_json_raw, quality_issues_raw):
+    """Convierte el analysis_json real de SOLICITUDES (forma NO uniforme entre tipos
+    de documento — verificado 2026-07-22 comparando un Acta con un Informe) al
+    esquema `analisis` del contrato v1 §4. Todo opcional: solo viaja lo que existe
+    de verdad como lista/texto real. Devuelve dict (posiblemente vacío)."""
+    a = _parse_json_or_none(analysis_json_raw) or {}
+    out = {}
+    if isinstance(a.get("purpose"), str) and a["purpose"].strip():
+        out["proposito"] = a["purpose"].strip()
+    alcance = a.get("scope")
+    if isinstance(alcance, str) and alcance.strip():
+        alcance = [alcance.strip()]
+    alcance = _lista_de_strings(alcance)
+    if alcance:
+        out["alcance"] = alcance
+    decisiones = _lista_de_strings(a.get("major_decisions")) or _lista_de_strings(a.get("decisions"))
+    if decisiones:
+        out["decisiones"] = decisiones
+    acciones = _lista_de_strings(a.get("actions"))
+    if acciones:
+        out["acciones"] = acciones
+    pendientes = _lista_de_strings(a.get("pending_items")) or _lista_de_strings(a.get("pending"))
+    if pendientes:
+        out["pendientes"] = pendientes
+    riesgos = _lista_de_strings(a.get("risks"))
+    if riesgos:
+        out["riesgos"] = riesgos
+    fechas = _lista_de_strings(a.get("key_dates"))
+    if fechas:
+        out["fechasClave"] = fechas
+    quality = a.get("quality") if isinstance(a.get("quality"), dict) else None
+    if quality is None:
+        quality = _parse_json_or_none(quality_issues_raw)
+        quality = quality if isinstance(quality, dict) else None
+    if quality:
+        sev = str(quality.get("severity") or "").strip().lower()
+        sev = {"medium": "media", "high": "alta", "low": "baja"}.get(sev, sev)
+        calidad = {}
+        if sev in ("baja", "media", "alta"):
+            calidad["severidad"] = sev
+        avisos = _lista_de_strings(quality.get("issues"))
+        if avisos:
+            calidad["avisos"] = avisos
+        if calidad:
+            out["calidad"] = calidad
+    return out
+
+
+def construir_entregable(fila, estado_deseado, bloqueo):
+    """Construye el objeto `entregable` del contrato v1 §3 desde la fila REAL de
+    SOLICITUDES (fuente de verdad). Mapeo confirmado con Daniel y el equipo de la
+    app: autorEmail = form_email (dominio @uvigoaerotech.com, puede diferir de
+    author_email personal); subsistema = unit_label (forma larga); etiquetas =
+    final_labels_canonical con fallback a tags_json; sustituyeA =
+    replacement_reference o null; enlaceDrive = carpeta publicada si existe, si no
+    el archivo fuente."""
+    etiquetas = _lista_de_strings(_parse_json_or_none(fila.get("final_labels_canonical"))) \
+        or _lista_de_strings(_parse_json_or_none(fila.get("tags_json")))
+    entregable = {
+        "ref": str(fila.get("reference") or "").strip(),
+        "titulo": str(fila.get("title_short") or fila.get("reference") or "").strip(),
+        "autorEmail": str(fila.get("form_email") or "").strip(),
+        "subsistema": str(fila.get("unit_label") or "").strip(),
+        "tipo": str(fila.get("document_type") or "").strip(),
+        "estado": estado_deseado,
+        "resumenEjecutivo": str(fila.get("executive_summary") or "").strip(),
+        "sustituyeA": str(fila.get("replacement_reference") or "").strip() or None,
+        "bloqueo": (bloqueo or "").strip() or None,
+    }
+    fecha = str(fila.get("received_at") or "").strip()
+    if len(fecha) >= 10:
+        entregable["fecha"] = fecha[:10]
+    analisis = normalizar_analisis(fila.get("analysis_json"), fila.get("quality_issues"))
+    if analisis:
+        entregable["analisis"] = analisis
+    enlace = str(fila.get("drive_folder_url") or fila.get("source_drive_url") or "").strip()
+    if enlace:
+        entregable["enlaceDrive"] = enlace
+    notion = str(fila.get("notion_page_url") or "").strip()
+    if notion:
+        entregable["paginaNotion"] = notion
+    if etiquetas:
+        entregable["etiquetas"] = etiquetas
+    return entregable
+
+
+def push_pendientes_app(sheets, config):
+    """IDA de la integración app-panel (AÑADIDO 2026-07-22, ver docstring del módulo):
+    procesa las filas PENDIENTE de COLA_PUSH_APP. Cada fila es un PUNTERO
+    (request_id + estado_deseado + bloqueo opcional); este script construye el
+    entregable completo desde la fila real de SOLICITUDES, hace el POST a
+    pushEntregable con la key del secret, marca EMPUJADO con la respuesta (o
+    reintenta hasta MAX_PUSH_APP_ATTEMPTS), y pone SOLICITUDES.pushed_to_app=TRUE.
+    Cowork solo encola; el POST siempre lo hace este script porque Cowork no tiene
+    red hacia Apps Script."""
+    url, key = _app_credentials(config)
+    if not url:
+        return
+    try:
+        values = get_values(sheets, f"{COLA_PUSH_APP_SHEET}!A1:Z")
+    except Exception as exc:
+        print(f"Aviso: no se pudo leer {COLA_PUSH_APP_SHEET}: {exc}", file=sys.stderr)
+        return
+    if not values:
+        return
+    header = [h.strip() for h in values[0]]
+    idx = {n: (header.index(n) if n in header else None)
+           for n in ("request_id", "ref", "estado_deseado", "bloqueo", "estado", "intentos",
+                     "fecha_solicitado", "fecha_empujado", "respuesta")}
+    if idx["estado"] is None or idx["request_id"] is None:
+        print(f"Aviso: {COLA_PUSH_APP_SHEET} sin cabeceras esperadas (estado/request_id) — se omite.", file=sys.stderr)
+        return
+    hay_pendientes = any(
+        idx["estado"] < len(row) and str(row[idx["estado"]]).strip() == "PENDIENTE"
+        for row in values[1:]
+    )
+    if not hay_pendientes:
+        return
+    # Solo si hay trabajo: lectura completa de SOLICITUDES para construir payloads.
+    try:
+        solicitudes = rows_as_dicts(sheets, "SOLICITUDES")
+    except SheetReadError as exc:
+        print(f"ERROR: no se pudo leer SOLICITUDES para el push a la app: {exc}", file=sys.stderr)
+        return
+    por_request_id = {str(r.get("request_id") or "").strip(): r for r in solicitudes}
+    for row_num, row in enumerate(values[1:], start=2):
+        def celda(name):
+            i = idx.get(name)
+            return row[i] if i is not None and i < len(row) else ""
+        if str(celda("estado")).strip() != "PENDIENTE":
+            continue
+        try:
+            intentos = int(str(celda("intentos") or "0").strip() or 0)
+        except ValueError:
+            intentos = 0
+        request_id = str(celda("request_id")).strip()
+        estado_deseado = str(celda("estado_deseado")).strip().lower() or "revision"
+        if estado_deseado not in ESTADOS_PUSH_PERMITIDOS:
+            _update_cola_push_row(sheets, row_num, idx, estado="ERROR_ESTADO_INVALIDO",
+                                  respuesta=f"estado_deseado '{estado_deseado}' no permitido; usar {ESTADOS_PUSH_PERMITIDOS}")
+            continue
+        fila = por_request_id.get(request_id)
+        if fila is None:
+            _update_cola_push_row(sheets, row_num, idx, estado="ERROR_REQUEST_ID_DESCONOCIDO",
+                                  respuesta=f"request_id {request_id!r} no existe en SOLICITUDES")
+            continue
+        entregable = construir_entregable(fila, estado_deseado, str(celda("bloqueo")))
+        if not entregable["ref"]:
+            _update_cola_push_row(sheets, row_num, idx, estado="ERROR_SIN_REFERENCE",
+                                  respuesta=f"la fila de SOLICITUDES de {request_id} no tiene reference")
+            continue
+        body = json.dumps(
+            {"action": "pushEntregable", "key": key, "entregable": entregable},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=body, headers={"Content-Type": "text/plain;charset=utf-8"}, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=APP_POST_TIMEOUT_S) as resp:
+                payload = json.load(resp)
+            if not payload.get("ok"):
+                raise RuntimeError(f"pushEntregable devolvió ok=false: {payload.get('error')!r}")
+        except Exception as exc:
+            intentos += 1
+            estado = "PENDIENTE" if intentos < MAX_PUSH_APP_ATTEMPTS else "ERROR_MAX_INTENTOS"
+            _update_cola_push_row(sheets, row_num, idx, estado=estado, intentos=intentos, respuesta=str(exc)[:500])
+            print(f"ERROR: push app fila {row_num} (intento {intentos}/{MAX_PUSH_APP_ATTEMPTS}): {exc}", file=sys.stderr)
+            continue
+        _update_cola_push_row(
+            sheets, row_num, idx,
+            estado="EMPUJADO", intentos=intentos, fecha_empujado=now_iso(),
+            respuesta=json.dumps(payload.get("data"), ensure_ascii=False)[:1500],
+        )
+        marcar_pushed_to_app(sheets, request_id)
+        print(f"Push OK: {entregable['ref']} ({request_id}) -> estado {estado_deseado}")
+
+
 def leer_decisiones_app(config):
     """Lee getEntregables del backend Apps Script de la app-panel (contrato v1, §7).
 
@@ -461,9 +742,8 @@ def leer_decisiones_app(config):
     La key viene de la variable de entorno COWORK_KEY (secret de GitHub Actions,
     nunca committeada), con fallback a CONFIG.APP_PUSH_KEY. La URL, de
     CONFIG.APP_PUSH_URL (con fallback a la env APP_PUSH_URL)."""
-    url = str(config.get("APP_PUSH_URL") or os.environ.get("APP_PUSH_URL") or "").strip()
-    key = str(os.environ.get("COWORK_KEY") or config.get("APP_PUSH_KEY") or "").strip()
-    if not url or not key:
+    url, key = _app_credentials(config)
+    if not url:
         print(
             "Aviso: integración app-panel no configurada (falta APP_PUSH_URL o COWORK_KEY) — "
             "se omite verificar_app_decisiones.",
@@ -528,6 +808,7 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
     detalle = {}
     bloqueos_conocidos_sin_cambios = []
     nuevo_estado = {}
+    app_decisiones_pendientes = []  # AÑADIDO 2026-07-22: objetos completos para Cowork
 
     # Lectura única y completa de SOLICITUDES, reutilizada por los pasos 2,3,5,6,7.
     try:
@@ -771,8 +1052,25 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
                 continue  # sin decisión (revision/publicando/publicado) o acción desconocida
             ref = str(ent.get("ref") or "").strip()
             fila = fila_activa_por_ref.get(ref)
-            if fila is None or not es_true(fila.get(columna)):
+            if fila is None:
+                # ref desconocida para SOLICITUDES (p.ej. los seeds DEMO de la app, o
+                # cualquier entregable no originado por el pipeline): Cowork no puede
+                # actuar sobre un expediente que no tiene — se ignora, no es señal.
+                continue
+            if not es_true(fila.get(columna)):
                 decisiones_pendientes.append(f"{ref} ({accion})")
+                # Objeto completo embebido en pipeline_status.json: Cowork no puede
+                # llamar a getEntregables (sin red hacia Apps Script), así que todo lo
+                # que necesita para actuar tiene que viajar en este JSON.
+                app_decisiones_pendientes.append({
+                    "ref": ref,
+                    "request_id": fila.get("request_id"),
+                    "accion": accion,
+                    "revisor": decision.get("revisor"),
+                    "motivo": decision.get("motivo"),
+                    "ajustes": decision.get("ajustes"),
+                    "decidedAt": ent.get("decidedAt") or decision.get("at"),
+                })
         if decisiones_pendientes:
             pasos["verificar_app_decisiones"] = True
             detalle["verificar_app_decisiones"] = (
@@ -781,7 +1079,7 @@ def calcular_pasos_necesarios(sheets, config, checkpoint_dt, seguimiento_rows, l
                 f"{'...' if len(decisiones_pendientes) > 10 else ''} — Cowork debe leer getEntregables y actuar"
             )
 
-    return pasos, detalle, bloqueos_conocidos_sin_cambios, nuevo_estado
+    return pasos, detalle, bloqueos_conocidos_sin_cambios, nuevo_estado, app_decisiones_pendientes
 
 
 def main():
@@ -805,6 +1103,7 @@ def main():
         "pasos_necesarios": {},
         "pasos_detalle": {},
         "bloqueos_conocidos_sin_cambios": [],
+        "app_decisiones_pendientes": [],
         "debe_ejecutar_pasada_completa": True,
         "nivel_pasada_recomendado": "COMPLETA",
         "motivo": "",
@@ -816,6 +1115,11 @@ def main():
         result["motivo"] = "EMERGENCY_STOP activo en CONFIG: no se recalculan señales, Cowork debe detenerse en su propio Paso 0."
         publish_result(sheets, result)
         return
+
+    # IDA de la app-panel (AÑADIDO 2026-07-22): procesar la cola de pushes ANTES de
+    # calcular señales, para que un push recién hecho ya se refleje en esta corrida.
+    # Deliberadamente después del guard de EMERGENCY_STOP (parado = no se empuja nada).
+    push_pendientes_app(sheets, config)
 
     if checkpoint_dt is None:
         result["debe_ejecutar_pasada_completa"] = True
@@ -942,12 +1246,13 @@ def main():
     # corrida anterior (ver STATE_FILE) — permite distinguir un bloqueo estructural ya
     # diagnosticado que sigue exactamente igual, de un cambio real que sí debe re-evaluarse.
     previous_state = load_state()
-    pasos_necesarios, pasos_detalle, bloqueos_conocidos_sin_cambios, nuevo_estado = calcular_pasos_necesarios(
+    pasos_necesarios, pasos_detalle, bloqueos_conocidos_sin_cambios, nuevo_estado, app_decisiones_pendientes = calcular_pasos_necesarios(
         sheets, config, checkpoint_dt, seguimiento_rows, lecturas_fallidas, previous_state
     )
     result["pasos_necesarios"] = pasos_necesarios
     result["pasos_detalle"] = pasos_detalle
     result["bloqueos_conocidos_sin_cambios"] = bloqueos_conocidos_sin_cambios
+    result["app_decisiones_pendientes"] = app_decisiones_pendientes
     if nuevo_estado:
         save_state(nuevo_estado)
 
