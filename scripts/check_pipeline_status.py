@@ -105,6 +105,18 @@ en las dos direcciones — mismo patrón que COLA_PUBLICACION_TEMPORAL_PDF:
 Consecuencia de seguridad: Cowork ya no necesita la key para nada; puede eliminarse
 CONFIG.APP_PUSH_KEY y dejarla SOLO como secret de GitHub Actions.
 
+CAMBIO 2026-07-26 (dead-man's switch del canal de envío, evidencia real: la
+plataforma de ChatGPT pausó sola la tarea "Solaris Mail Send" el 2026-07-22 y
+nadie se enteró en ~3,5 días porque la alerta crítica era un borrador de Gmail
+que debía enviar precisamente la IA pausada — dependencia circular). Ahora este
+script avisa por Discord (canal independiente de ChatGPT y de Cowork) cuando el
+borrador más antiguo en SEGUIMIENTO_ENVIOS.BORRADOR_PENDIENTE supera
+UMBRAL_HORAS_BORRADORES_ATASCADOS. Anti-spam: re-avisa como mucho cada
+REALERTA_CADA_HORAS mientras la condición persista, con estado en
+ALERTA_ENVIOS_STATE_FILE (committeado con el resto). Webhook: env
+DISCORD_WEBHOOK_URL (secret de Actions) con fallback a CONFIG.DISCORD_WEBHOOK_URL;
+si falta, se omite con aviso en stderr. Un fallo del webhook nunca tira la corrida.
+
 Requiere la misma variable de entorno GDRIVE_SA_KEY (JSON de la service
 account) que ya usa publish_temp_pdfs.py.
 """
@@ -194,6 +206,12 @@ MAX_PUSH_APP_ATTEMPTS = 5  # mismo espíritu que MAX_DRIVE_CLEANUP_ATTEMPTS
 # Estados que Cowork puede pedir empujar (contrato v1 §5) — NUNCA los de decisión
 # (aprobado/anot/cambios/rechazado), que son propiedad exclusiva de la app.
 ESTADOS_PUSH_PERMITIDOS = ("recibido", "analizado", "revision", "publicando", "publicado")
+
+# Dead-man's switch del canal de envío (AÑADIDO 2026-07-26, ver docstring del módulo).
+UMBRAL_HORAS_BORRADORES_ATASCADOS = 6   # borrador más antiguo en BORRADOR_PENDIENTE
+REALERTA_CADA_HORAS = 6                 # anti-spam mientras la condición persista
+ALERTA_ENVIOS_STATE_FILE = "data/alerta_envios_last.json"
+DISCORD_TIMEOUT_S = 15
 
 
 def calcular_nivel_pasada(señales, lecturas_fallidas, pasos_necesarios):
@@ -474,6 +492,85 @@ def publish_result(sheets, result):
         )
     write_and_push(result)
     rotate_status_url(sheets, result)
+
+
+def alerta_discord_envios_atascados(config, seguimiento_rows):
+    """Dead-man's switch del canal de envío (AÑADIDO 2026-07-26): si el borrador más
+    antiguo en BORRADOR_PENDIENTE supera UMBRAL_HORAS_BORRADORES_ATASCADOS, avisa por
+    Discord — un canal que NO depende de ChatGPT (el enviador) ni de Cowork, rompiendo
+    la dependencia circular de "la alerta de que el enviador está caído es un borrador
+    que debe enviar el enviador caído". Anti-spam vía ALERTA_ENVIOS_STATE_FILE:
+    re-avisa como mucho cada REALERTA_CADA_HORAS; al resolverse, deja el estado en
+    RESUELTA para que el siguiente incidente avise inmediatamente."""
+    ahora = now_dt()
+    pendientes = [
+        r for r in seguimiento_rows
+        if (r.get("estado_final") or "").strip() == "BORRADOR_PENDIENTE"
+    ]
+    mas_antiguo = None
+    for r in pendientes:
+        dt = parse_iso(r.get("fecha_borrador_creado"))
+        if dt and (mas_antiguo is None or dt < mas_antiguo):
+            mas_antiguo = dt
+    atascado = mas_antiguo is not None and (ahora - mas_antiguo) >= timedelta(hours=UMBRAL_HORAS_BORRADORES_ATASCADOS)
+
+    estado_previo = {}
+    if os.path.exists(ALERTA_ENVIOS_STATE_FILE):
+        try:
+            with open(ALERTA_ENVIOS_STATE_FILE, "r", encoding="utf-8") as f:
+                estado_previo = json.load(f) or {}
+        except (json.JSONDecodeError, OSError):
+            estado_previo = {}
+
+    def guardar(nuevo):
+        os.makedirs(os.path.dirname(ALERTA_ENVIOS_STATE_FILE) or ".", exist_ok=True)
+        with open(ALERTA_ENVIOS_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(nuevo, f, ensure_ascii=False, separators=(",", ":"))
+
+    if not atascado:
+        if estado_previo.get("estado") == "ACTIVA":
+            guardar({"estado": "RESUELTA", "resolvedAt": now_iso()})
+            print("Alerta de envíos atascados: condición resuelta.")
+        return
+
+    ultima = parse_iso(estado_previo.get("alertedAt"))
+    if estado_previo.get("estado") == "ACTIVA" and ultima and (ahora - ultima) < timedelta(hours=REALERTA_CADA_HORAS):
+        return  # ya avisado hace poco; seguirá re-avisando cada REALERTA_CADA_HORAS
+
+    webhook = str(os.environ.get("DISCORD_WEBHOOK_URL") or config.get("DISCORD_WEBHOOK_URL") or "").strip()
+    if not webhook:
+        print(
+            f"AVISO: {len(pendientes)} borrador(es) atascados en BORRADOR_PENDIENTE (el más antiguo "
+            f"desde {mas_antiguo.isoformat()}) pero no hay DISCORD_WEBHOOK_URL configurada — no se puede alertar.",
+            file=sys.stderr,
+        )
+        return
+
+    horas = int((ahora - mas_antiguo).total_seconds() // 3600)
+    contenido = (
+        f"⚠️ **[Solaris] Canal de envío posiblemente caído** — {len(pendientes)} borrador(es) "
+        f"en BORRADOR_PENDIENTE, el más antiguo lleva ~{horas} h (desde {mas_antiguo.isoformat()}). "
+        f"Revisa la tarea 'Solaris Mail Send' de ChatGPT (causa habitual: pausa automática de la "
+        f"plataforma por inactividad). Detalle en SEGUIMIENTO_ENVIOS."
+    )
+    body = json.dumps({"content": contenido}, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        webhook, data=body, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=DISCORD_TIMEOUT_S):
+            pass
+    except Exception as exc:
+        # No se guarda estado: la próxima corrida reintentará el aviso.
+        print(f"ERROR: no se pudo enviar la alerta de Discord: {exc}", file=sys.stderr)
+        return
+    guardar({
+        "estado": "ACTIVA",
+        "alertedAt": now_iso(),
+        "borrador_mas_antiguo": mas_antiguo.isoformat(),
+        "pendientes": len(pendientes),
+    })
+    print(f"Alerta de Discord enviada: {len(pendientes)} borrador(es) atascados, el más antiguo ~{horas} h.")
 
 
 def _app_credentials(config):
@@ -1180,6 +1277,12 @@ def main():
     if seguimiento_pendiente:
         motivos.append("hay seguimiento de envíos pendiente en SEGUIMIENTO_ENVIOS" if "SEGUIMIENTO_ENVIOS" not in lecturas_fallidas else "no se pudo leer SEGUIMIENTO_ENVIOS (se asume pendiente por seguridad)")
 
+    # --- Dead-man's switch del canal de envío (AÑADIDO 2026-07-26) ---
+    try:
+        alerta_discord_envios_atascados(config, seguimiento_rows)
+    except Exception as exc:
+        print(f"Aviso: fallo en la alerta de envíos atascados (no bloquea la corrida): {exc}", file=sys.stderr)
+
     # --- Señal 4: SOLICITUDES.updated_at (lectura ligera, solo la columna) ---
     try:
         solicitudes_header = get_values(sheets, "SOLICITUDES!A1:ZZ1")
@@ -1311,6 +1414,8 @@ def git_commit_and_push_with_retry(max_attempts=5):
     add_args = [OUTPUT_PATH]
     if os.path.exists(STATE_FILE):
         add_args.append(STATE_FILE)
+    if os.path.exists(ALERTA_ENVIOS_STATE_FILE):  # AÑADIDO 2026-07-26 (dead-man's switch)
+        add_args.append(ALERTA_ENVIOS_STATE_FILE)
     git("add", *add_args)
     commit_result = git("commit", "-m", "Actualizar pipeline_status.json", check=False)
     if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stdout:
