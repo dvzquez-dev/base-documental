@@ -166,7 +166,19 @@ PDF_MIME = "application/pdf"
 # de OTRO expediente copiada por error, Y placeholder de plantilla sin rellenar) con
 # la misma lógica de sustitución de más abajo (cualquier match que no sea ya igual a
 # correct_reference se sustituye).
-REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-(?:\d{3,5}|[Xx]{3,5})_(?:\d{2}|[Xx]{2})")
+# AMPLIADO 2026-09-28 (plantilla nueva de Propulsión): el patrón anterior admitía
+# O todo dígitos O todo equis, pero NO la mezcla — y la plantilla que se reparte hoy
+# trae "Informe_S-41xx_2x" (41 = unidad+subcarpeta reales, xx = numeral por rellenar,
+# 2x = temporada por rellenar). Comprobado ejecutando el regex: salía CIEGO, o sea que
+# habría repetido exactamente el caso 79E115DB — fecha corregida, referencia intacta en
+# las 20+ páginas, y sin dar error. La mezcla es lo natural en una plantilla: la parte
+# que ya se sabe va en cifras y la que no, en equis.
+REFERENCE_PATTERN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ]+_S-[\dXx]{3,5}_[\dXx]{2}")
+
+# LA FORMA CANÓNICA, EN UN SOLO SITIO (2026-09-28). Vivía escrita a mano dentro de
+# `_regex_referencia_tolerante`, y ahora la necesitan dos sitios más: dos copias del
+# mismo criterio que hoy coinciden por casualidad es como se rompen en silencio.
+REFERENCIA_CANONICA = re.compile(r"([A-Za-zÀ-ÖØ-öø-ÿ]+)_S-(\d{3,5})_(\d{2})")
 
 
 def _regex_referencia_tolerante(reference):
@@ -179,7 +191,7 @@ def _regex_referencia_tolerante(reference):
     matches idénticos a correct_reference, así que la corrección es idempotente.
     Devuelve None si la reference no sigue el formato canónico (mejor no tocar nada
     que adivinar)."""
-    m = re.fullmatch(r"([A-Za-zÀ-ÖØ-öø-ÿ]+)_S-(\d{3,5})_(\d{2})", reference)
+    m = REFERENCIA_CANONICA.fullmatch(reference)
     if not m:
         return None
     word, num, season = m.groups()
@@ -833,7 +845,26 @@ def main():
             continue
         docx_file_id = row.get("drive_docx_file_id") or row.get("source_drive_file_id")
         folder_id = row.get("drive_folder_id")
-        reference = row.get("reference") or request_id
+        # AÑADIDO 2026-09-28: aquí ponía `row.get("reference") or request_id`. Con la
+        # columna vacía se colaba el request_id ("SOL-DOC-...") COMO SI FUERA una
+        # referencia documental, y acababa (a) estampado en la cabecera de todas las
+        # páginas del DOCX y (b) dando nombre a la carpeta del expediente en Drive.
+        # Falla hacia ESCRIBIR, que es la peor dirección posible: es preferible saltar
+        # la fila y decir por qué. Requiere `approved`, así que una reference vacía
+        # aquí significa que algo de más arriba ya se rompió — razón de más para parar.
+        reference = (row.get("reference") or "").strip()
+        _ref_m = REFERENCIA_CANONICA.fullmatch(reference)
+        if not _ref_m:
+            skipped.append((request_id, f"reference no canónica en SOLICITUDES ({reference!r}): no se estampa nada"))
+            continue
+        # Y SE CRUZA CON `reserved_id`, porque quien decide el número es EL FORMULARIO:
+        # unidad + subcarpeta + numeral, resueltos contra RUTAS. Una reference que no
+        # lleve dentro el reserved_id reservado contradice la respuesta del formulario,
+        # y estamparla propagaría el error a la cabecera y a la carpeta de Drive.
+        _rid = str(row.get("reserved_id") or "").strip()
+        if _rid and _ref_m.group(2) != _rid:
+            skipped.append((request_id, f"la reference {reference} no lleva el reserved_id {_rid}: contradice la respuesta del formulario"))
+            continue
         if not docx_file_id:
             skipped.append((request_id, "sin drive_docx_file_id/source_drive_file_id"))
             continue

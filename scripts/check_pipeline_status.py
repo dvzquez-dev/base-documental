@@ -131,6 +131,16 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+# AÑADIDO 2026-09-28, mismo patrón que `fix_docx_publication_date.py`: la hoja de
+# respuestas escribe en hora local de Madrid. Si el runner no trae tzdata, `None` y
+# quien lo use decide — no se inventa un desfase fijo, que en verano y en invierno
+# no es el mismo.
+try:
+    from zoneinfo import ZoneInfo
+    _MADRID_TZ = ZoneInfo("Europe/Madrid")
+except Exception:  # pragma: no cover - fallback si el runner no tiene tzdata
+    _MADRID_TZ = None
+
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -297,6 +307,31 @@ def parse_iso(value):
         return dt
     except Exception:
         return None
+
+
+def _parse_fecha_form(value):
+    """La marca temporal de la hoja de respuestas de Forms: "DD/MM/AAAA HH:MM:SS".
+
+    AÑADIDO 2026-09-28. Intenta ISO primero (por si algún día la hoja cambia de
+    formato) y cae al formato de Forms después. Devuelve None si no entiende nada:
+    'no lo sé' no es 'no hay novedad', y quien llama ya trata el None como
+    best-effort.
+
+    ⚠ EL HUSO IMPORTA: Forms escribe en hora LOCAL de Madrid y el checkpoint va en
+    UTC, así que con la zona mal hay hasta DOS HORAS en las que una respuesta nueva
+    parecería más vieja que el checkpoint. Si el runner no trae tzdata se etiqueta
+    como UTC a propósito: eso hace que la marca parezca MÁS TARDE de lo que es, o
+    sea que falla hacia 'hay novedad' — una pasada de más cuesta minutos, una de
+    menos pierde un documento.
+    """
+    dt = parse_iso(value)
+    if dt:
+        return dt
+    try:
+        naive = datetime.strptime(str(value).strip(), "%d/%m/%Y %H:%M:%S")
+    except Exception:
+        return None
+    return naive.replace(tzinfo=_MADRID_TZ or timezone.utc)
 
 
 def es_true(value):
@@ -1321,7 +1356,16 @@ def main():
             ).execute()
             values = resp.get("values", [])
             if values:
-                last_ts = parse_iso(values[-1][0]) if values[-1] else None
+                # ARREGLADO 2026-09-28: aquí se llamaba a `parse_iso` a secas, y la
+                # columna A de la hoja de respuestas NO va en ISO: va en
+                # "DD/MM/AAAA HH:MM:SS" (hora local de Madrid, la que escribe Forms).
+                # `parse_iso` devolvía None SIEMPRE, así que esta señal no podía valer
+                # True ni una vez desde que se escribió — comprobado ejecutando el propio
+                # `parse_iso` contra los valores reales de la hoja.
+                # No había costado un documento porque el detector del Paso 1 cuenta
+                # filas por su cuenta y la cubría; o sea, un SEGUNDO detector muerto que
+                # nadie podía notar precisamente porque el primero funciona.
+                last_ts = _parse_fecha_form(values[-1][0]) if values[-1] else None
                 if last_ts and last_ts > checkpoint_dt:
                     form_novedad = True
     except Exception as exc:

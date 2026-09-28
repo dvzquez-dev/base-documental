@@ -1,0 +1,23 @@
+name: Tests
+# Por qué existe: los tres fallos que arregla `scripts/test_referencias_y_senales.py` no daban
+# error — el regex no veía el placeholder, la señal del formulario devolvía False siempre, y una
+# `reference` vacía se estampaba como referencia. Un banco que nadie corre se pudre igual que
+# ellos, así que corre en cada push y en cada PR.
+on:
+  push:
+    branches: ["**"]
+  pull_request: {}
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # No se instalan las librerías de Google a propósito: el banco las dobla, así que
+      # comprueba funciones puras sin credenciales ni red.
+      - run: python scripts/test_referencias_y_senales.py
