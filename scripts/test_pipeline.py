@@ -51,8 +51,12 @@ def sin(base, **kw):
 
 
 # ── 1. Las acciones ────────────────────────────────────────────────────────────────────────
-ok(len(P.ACCIONES) == 9, "deberían ser 9 acciones: %d" % len(P.ACCIONES))
-ok(len(set(P.ACCIONES)) == 9, "hay acciones repetidas en ACCIONES")
+# ⚠️ 10 desde el 30/09: entra `PDF` (generar el PDF desde el DOCX antes de publicar).
+ok(len(P.ACCIONES) == 10, "deberían ser 10 acciones: %d" % len(P.ACCIONES))
+# ⛔ Los duplicados se miran CONTRA EL PROPIO RECUENTO, no contra el número de arriba: con
+#    los dos atados al mismo literal, esto era la misma afirmación escrita dos veces.
+ok(len(set(P.ACCIONES)) == len(P.ACCIONES),
+   "hay acciones repetidas en ACCIONES: %r" % (P.ACCIONES,))
 # ⛔ Una sola acción necesita modelo. Es el número que justifica todo el reparto, así que se fija.
 ok(P.CON_MODELO == (P.ANALIZAR,),
    "las acciones que necesitan modelo ya no son sólo analizar: %r" % (P.CON_MODELO,))
@@ -138,6 +142,44 @@ a, por = P.siguiente(sin(PUBLICADA, closed=F, notion_page_created=F,
                          base_database_registered=F))
 ok(a == P.PUBLICAR, "aprobada y sin publicar debería publicar, toca %r" % a)
 ok("notion_page_created" in por, "el por qué no dice QUÉ falta: %r" % por)
+
+# ── ⛔⛔ EL PDF VA ANTES DE PUBLICAR ─────────────────────────────────────────
+# `publicar` sube `drive_primary_file_id` — el PDF — y si no lo hay **cae al DOCX original**.
+# Notion lo acepta y crea un bloque de fichero **que no se puede leer en la página**: quien abra
+# el documento ve un adjunto para descargar, que es justo lo que la página existe para evitar.
+# ⚠️ Ese respaldo tenía su motivo escrito — *«quedarse sin documento esperando un fichero que
+#    NADIE VA A GENERAR es peor que un adjunto sin previsualización»* — y ese motivo **caduca
+#    hoy**: desde que existe `pdf.docx_a_pdf`, sí hay quien lo genere. El respaldo se queda (por
+#    si LibreOffice falla), pero deja de ser la vía normal.
+_DOCX = sin(PUBLICADA, closed=F, notion_page_created=F, base_database_registered=F,
+            source_filename="memoria.docx", drive_primary_file_id="")
+a, por = P.siguiente(_DOCX)
+ok(a == P.PDF, u"⛔⛔ con un DOCX y sin PDF debería GENERARLO antes de publicar; toca %r" % a)
+ok("PDF" in por or "pdf" in por, u"el por qué no nombra el PDF: %r" % por)
+
+# ⚠️ Con el PDF ya hecho, sigue el camino de siempre.
+a, _ = P.siguiente(sin(_DOCX, drive_primary_file_id="1PDF"))
+ok(a == P.PUBLICAR, u"⛔ con el PDF ya generado debería publicar, no regenerarlo; toca %r" % a)
+
+# ⛔ Y si el original YA es un PDF no hay nada que convertir: pedirlo dejaría el expediente
+#    dando vueltas en un paso imposible.
+a, _ = P.siguiente(sin(_DOCX, source_filename="informe.pdf"))
+ok(a == P.PUBLICAR, u"⛔ con un original que YA es PDF no hay nada que generar; toca %r" % a)
+
+# ⚠️ Sin saber cómo se llama el fichero no se adivina: se publica como siempre. Fallar hacia
+#    «generar» dejaría a LibreOffice intentando convertir cualquier cosa.
+a, _ = P.siguiente(sin(_DOCX, source_filename=""))
+ok(a == P.PUBLICAR, u"sin nombre de fichero no se pide una conversión a ciegas; toca %r" % a)
+
+# ⛔⛔ Y NO se pide el PDF de algo sin aprobar: el orden manda. Una fila sin decisión espera,
+#    aunque sea un DOCX — generar el PDF de algo que puede acabar rechazado es trabajo tirado, y
+#    peor: deja un fichero en la carpeta de un expediente que nadie aprobó.
+a, _ = P.siguiente(sin(_DOCX, approved=F))
+ok(a != P.PDF, u"⛔⛔ genera el PDF de un expediente SIN aprobar: toca %r" % a)
+
+# ⚠️ Y la acción existe en la lista: una acción que se devuelve y no está en `ACCIONES` se cae
+#    del reparto sin que nadie lo note.
+ok(P.PDF in P.ACCIONES, u"⛔ `PDF` no está en `ACCIONES`: el reparto lo perdería en silencio")
 
 # ⛔ El caso fino: si lo ÚNICO que falta es el Libro, toca registrar, no re-publicar. Publicar de
 #    nuevo lo que ya está publicado es como se crean las páginas duplicadas.

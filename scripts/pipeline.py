@@ -39,6 +39,7 @@ import sustitucion as SU
 
 # Las acciones que el pipeline sabe hacer, en el orden en que ocurren.
 ANALIZAR = "analizar"
+PDF = "pdf"
 ESPERAR = "esperar_decision"
 PUBLICAR = "publicar_notion"
 REGISTRAR = "registrar_libro"
@@ -49,7 +50,8 @@ REVISAR = "revisar_a_mano"
 # ⛔ «El trabajo ya está hecho en el mundo, sólo falta marcarlo». No llama a nadie.
 ANOTAR = "anotar_lo_hecho"
 
-ACCIONES = (ANALIZAR, ESPERAR, PUBLICAR, REGISTRAR, CERRAR, REENVIO, NADA, REVISAR, ANOTAR)
+ACCIONES = (ANALIZAR, PDF, ESPERAR, PUBLICAR, REGISTRAR, CERRAR, REENVIO, NADA, REVISAR,
+            ANOTAR)
 
 # ⚠️ El único paso que sigue necesitando un modelo. Los demás son deterministas, y por eso el
 #    reparto es «la IA escribe el código, el código ejecuta»: llamar a un modelo para reservar un
@@ -73,6 +75,19 @@ CON_MODELO = (ANALIZAR,)
 # ⚠️ La lista se queda (vacía) a propósito: es la puerta por la que una bandera nueva se
 #    declara «nadie la hace todavía» en vez de darse por hecha en silencio.
 SIN_IMPLEMENTAR = ()
+
+
+def _falta_el_pdf(fila):
+    """¿Hay que generar el PDF de este expediente? Nunca lanza.
+
+    ⚠️ Mira el **nombre del original**, no una bandera: no hay ninguna que diga «PDF generado»,
+    y la prueba de que está es `drive_primary_file_id`, que es lo que `publicar` sube.
+    """
+    fila = fila if isinstance(fila, dict) else {}
+    if str(fila.get("drive_primary_file_id") or "").strip():
+        return False
+    nombre = str(fila.get("source_filename") or "").strip().lower()
+    return nombre.endswith(".docx")
 
 
 def siguiente(fila, cadena=None):
@@ -143,6 +158,21 @@ def siguiente(fila, cadena=None):
         return ANOTAR, u"ya está hecho y sin marcar: %s" % u", ".join(anotables)
 
     faltan = [b for b in C.PUBLICACION if not C.es_si(fila.get(b))]
+
+    # ⛔⛔ EL PDF, ANTES DE PUBLICAR. `servicios.publicar` sube `drive_primary_file_id` —el
+    #    PDF— y si no lo hay **cae al DOCX original**: Notion lo acepta, crea un bloque de
+    #    fichero **que no se puede leer en la página**, y quien abra el documento ve un adjunto
+    #    para descargar. Eso es justo lo que la página existe para evitar.
+    # ⚠️ Aquel respaldo tenía su motivo escrito — *«quedarse sin documento esperando un fichero
+    #    que NADIE VA A GENERAR es peor que un adjunto sin previsualización»* — y ese motivo
+    #    **caducó** el 30/09: desde que existe `pdf.docx_a_pdf`, sí hay quien lo genere. El
+    #    respaldo se queda por si LibreOffice falla, pero deja de ser la vía normal.
+    # ⚠️ Va DESPUÉS de `ya_hecho` y de mirar `faltan`: si la publicación está entera no hay
+    #    nada que generar, y pedirlo dejaría al expediente dando vueltas en un paso inútil.
+    # ⚠️ Y **sin nombre de fichero no se adivina**: se publica como siempre. Fallar hacia
+    #    «generar» dejaría a LibreOffice intentando convertir cualquier cosa.
+    if faltan and _falta_el_pdf(fila):
+        return PDF, u"aprobada, el original es un DOCX y no hay PDF que publicar"
 
     if faltan == ["base_database_registered"]:
         return REGISTRAR, u"publicada y sin registrar en el Libro de Datos"

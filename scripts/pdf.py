@@ -115,5 +115,21 @@ def pdf_lleva(pdf, referencia, workdir, correr=None):
     return str(referencia).strip() in (r.stdout or "")
 
 
+def medio_pdf(datos):
+    """El `media_body` para subir un PDF a Drive. **Sin respaldo, a propósito.**
+
+    ⛔ Si `googleapiclient` no está, esto **lanza**. La tentación era devolver `None` y seguir:
+    eso crea en Drive un fichero **vacío con su id**, y quien lo recibe (`publicar`) lo sube a
+    Notion tan contento. Un PDF de 0 bytes con buena pinta es peor que no tenerlo.
+    ⚠️ Vive aquí y no dentro de `servicios` para que el banco pueda sustituirlo: es la misma
+    costura que `correr=` en `modelo` y en las dos funciones de arriba.
+    """
+    import io as _io
+
+    from googleapiclient.http import MediaIoBaseUpload
+
+    return MediaIoBaseUpload(_io.BytesIO(datos), mimetype="application/pdf", resumable=True)
+
+
 if __name__ == "__main__":  # pragma: no cover
     print(u"DOCX a PDF. Para probarlo: python scripts/test_pdf.py")

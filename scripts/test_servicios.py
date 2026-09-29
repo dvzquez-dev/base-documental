@@ -468,6 +468,109 @@ ok(_paro, u"⛔ con un PDF debería plantarse diciendo que no lo sabe leer, no r
 ok(_M.preguntar is not None and _M.preguntar.__module__ == "modelo",
    u"⛔ el doble de `modelo.preguntar` se quedó puesto: lo de abajo mediría mentira")
 
+# ── `generar_pdf`: el DOCX a PDF, y sobre todo QUE EL PDF SEA EL BUENO ─────────────────
+import pdf as _PDFM
+
+_FILA_PDF = dict(FILA, source_drive_file_id="F-docx", source_filename="memoria.docx",
+                 reference="Informe_S-4012_27", drive_folder_id="F-exp")
+
+
+def _dobles_pdf(pdf_bytes=b"%PDF-1.7 bueno", lleva=True, motivos=None):
+    """Sustituye las tres puertas de `pdf` y devuelve cómo deshacerlo."""
+    _orig = (_PDFM.docx_a_pdf, _PDFM.pdf_lleva, _PDFM.medio_pdf)
+    _visto = {}
+    _PDFM.docx_a_pdf = lambda datos, wd, **k: (pdf_bytes, list(motivos or []))
+    _PDFM.pdf_lleva = lambda p, r, wd, **k: lleva
+    def _medio(d):
+        _visto["bytes"] = d
+        return "MEDIO"
+    _PDFM.medio_pdf = _medio
+    return _orig, _visto
+
+
+def _deshacer_pdf(_orig):
+    _PDFM.docx_a_pdf, _PDFM.pdf_lleva, _PDFM.medio_pdf = _orig
+
+
+# La pasada buena: se sube y se devuelve el id, que es la PRUEBA de que se hizo.
+_o, _v = _dobles_pdf()
+try:
+    _dr = Drive(resp={"id": "F-pdf-nuevo"}, meta={"name": "memoria.docx", "parents": ["F-padre"]})
+    _ex = S.Servicios(notion_get=_esq, sheets=Sheets({}), drive=_dr).generar_pdf(_FILA_PDF)
+    ok(_ex == {"drive_primary_file_id": "F-pdf-nuevo"},
+       u"no devuelve el id del PDF: %r" % (_ex,))
+    ok(_v.get("bytes") == b"%PDF-1.7 bueno", u"no sube los bytes del PDF generado: %r" % (_v,))
+    _creates = [k for n, k in _dr.diario if n == "create"]
+    ok(_creates and _creates[0].get("body", {}).get("parents") == ["F-exp"],
+       u"⛔ no lo deja en la carpeta del expediente: %r" % (_creates,))
+    ok(_creates and _creates[0]["body"]["name"] == "Informe_S-4012_27.pdf",
+       u"el PDF no se llama como la referencia: %r" % (_creates,))
+    ok(_creates and _creates[0].get("media_body") == "MEDIO",
+       u"⛔⛔ sube sin `media_body`: eso crea en Drive un fichero VACÍO con su id, y `publicar` "
+       u"lo subiría a Notion tan contento: %r" % (_creates,))
+finally:
+    _deshacer_pdf(_o)
+
+# ⛔⛔ Y el caso que justifica el paso entero: un PDF que NO lleva su referencia no se sube.
+#    «Convertir» no es «convertir bien», y un PDF del documento equivocado pesa igual.
+_o, _v = _dobles_pdf(lleva=False)
+try:
+    _dr = Drive(resp={"id": "F-no"}, meta={"name": "m.docx", "parents": ["F-p"]})
+    S.Servicios(notion_get=_esq, sheets=Sheets({}), drive=_dr).generar_pdf(_FILA_PDF)
+    _paro = False
+except SystemExit as _e:
+    _paro = u"referencia" in str(_e)
+finally:
+    _deshacer_pdf(_o)
+ok(_paro, u"⛔⛔ sube un PDF que NO lleva su referencia dentro: nadie va a volver a mirarlo")
+ok([n for n, _ in _dr.diario].count("create") == 0,
+   u"⛔ lo sube igual antes de plantarse: %r" % (_dr.diario,))
+
+# ⚠️ Pero «no se pudo comprobar» (None, típicamente falta `pdftotext`) SÍ sube, y lo dice.
+#    Negarse ahí pararía el expediente por una herramienta que falta en la MÁQUINA, no por el
+#    documento. Son dos averías y se arreglan en sitios distintos.
+_o, _v = _dobles_pdf(lleva=None)
+try:
+    _dr = Drive(resp={"id": "F-sin-verificar"}, meta={"name": "m.docx", "parents": ["F-p"]})
+    _ex = S.Servicios(notion_get=_esq, sheets=Sheets({}), drive=_dr).generar_pdf(_FILA_PDF)
+    ok(_ex == {"drive_primary_file_id": "F-sin-verificar"},
+       u"⛔ con la verificación imposible debería subir igual: %r" % (_ex,))
+finally:
+    _deshacer_pdf(_o)
+
+# ⛔ Si la conversión falla, se planta CON lo que dijo LibreOffice.
+_o, _v = _dobles_pdf(pdf_bytes=None, motivos=[u"no encuentro `soffice`: hay que instalar LibreOffice"])
+try:
+    S.Servicios(notion_get=_esq, sheets=Sheets({}),
+                drive=Drive(meta={"name": "m.docx", "parents": ["F-p"]})).generar_pdf(_FILA_PDF)
+    _paro = False
+except SystemExit as _e:
+    _paro = u"LibreOffice" in str(_e)
+finally:
+    _deshacer_pdf(_o)
+ok(_paro, u"⛔ con la conversión rota no dice qué pasó: el motivo es lo único accionable")
+
+# ⚠️ Sin DOCX no se inventa nada.
+try:
+    S.Servicios(notion_get=_esq, sheets=Sheets({}), drive=Drive()).generar_pdf(FILA)
+    _paro = False
+except SystemExit as _e:
+    _paro = u"DOCX" in str(_e)
+ok(_paro, u"⛔ sin `source_drive_file_id` debería plantarse")
+
+# ⚠️ Y sin carpeta del expediente, al lado del original — no se espera a que exista: la crea
+#    `publicar`, y `publicar` es justo quien espera a este PDF. Eso sería un bucle.
+_o, _v = _dobles_pdf()
+try:
+    _dr = Drive(resp={"id": "F-junto"}, meta={"name": "m.docx", "parents": ["F-padre-real"]})
+    S.Servicios(notion_get=_esq, sheets=Sheets({}),
+                drive=_dr).generar_pdf(dict(_FILA_PDF, drive_folder_id=""))
+    _cr = [k for n, k in _dr.diario if n == "create"]
+    ok(_cr and _cr[0]["body"]["parents"] == ["F-padre-real"],
+       u"⛔ sin carpeta del expediente no lo deja al lado del original: %r" % (_cr,))
+finally:
+    _deshacer_pdf(_o)
+
 # ⚠️ `cerrar` existe y está vacío a propósito: sin el método, el ejecutor diría que no existe y
 #    ningún expediente se cerraría nunca.
 ok(S.Servicios(notion_get=_esq, sheets=Sheets({})).cerrar(FILA) == {},

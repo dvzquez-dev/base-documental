@@ -43,6 +43,9 @@ import pipeline as P
 #    acción nueva sin decidir qué la atiende falle en voz alta, en vez de no hacer nada callando.
 ATIENDE = {
     P.ANALIZAR: ("analizar", ("analyzed",)),
+    # ⚠️ SIN banderas: no hay ninguna que diga «PDF generado». La prueba es el
+    #    `drive_primary_file_id` que devuelve el servicio, y de eso ya se encarga `extra`.
+    P.PDF: ("generar_pdf", ()),
     # ⛔⛔ SÓLO LA BANDERA QUE `servicios.publicar` HACE DE VERDAD (695.ª, 29/09).
     #    Aquí prometía las SIETE de publicación y el adaptador sólo crea la página de Notion:
     #    habría escrito «PDF embebido», «carpeta de Drive creada» y «permisos verificados» en

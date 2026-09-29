@@ -772,6 +772,78 @@ class Servicios(object):
                              "la pasada siguiente crearía otro")
         return {"drive_summary_file_id": sid}
 
+    def generar_pdf(self, fila):
+        """El PDF del expediente, desde el DOCX original. Devuelve `drive_primary_file_id`.
+
+        ⛔ **Por qué existe este paso**: `publicar` sube `drive_primary_file_id` y, si no lo hay,
+        **cae al DOCX original**. Notion lo acepta y crea un bloque de fichero **que no se puede
+        leer en la página**: quien abra el documento ve un adjunto para descargar, que es justo
+        lo que la página existe para evitar.
+
+        ⛔⛔ **Y no basta con convertir: hay que comprobar que el PDF es EL BUENO.** Un PDF
+        generado del documento equivocado pesa igual y tiene la misma pinta. Se abre y se busca
+        la referencia dentro (`pdf.pdf_lleva`), y **con `False` no se sube**.
+        ⚠️ Con **`None`** —no se pudo comprobar, típicamente falta `pdftotext`— **sí se sube y se
+        deja dicho**: negarse ahí dejaría el expediente parado por una herramienta que falta en
+        la máquina, no por el documento. Son dos averías distintas y se arreglan en sitios
+        distintos.
+
+        ⚠️ La conversión vive en `pdf.py`, que es **el mismo código** que usa
+        `fix_docx_publication_date.py`. No hay dos implementaciones.
+        """
+        import shutil
+        import tempfile
+
+        import pdf as PDFM
+
+        fid = str(fila.get("source_drive_file_id") or "").strip()
+        if not fid:
+            raise SystemExit(u"no hay DOCX que convertir: falta `source_drive_file_id`")
+        ref = str(fila.get("reference") or "").strip()
+
+        meta = self.drive.files().get(fileId=fid, fields="name,parents",
+                                      supportsAllDrives=True).execute() or {}
+        datos = self.drive.files().get_media(fileId=fid, supportsAllDrives=True).execute()
+        datos = datos if isinstance(datos, bytes) else bytes(datos or b"")
+
+        tmp = tempfile.mkdtemp()
+        try:
+            pdf_bytes, motivos = PDFM.docx_a_pdf(datos, tmp)
+            if pdf_bytes is None:
+                raise SystemExit(u"no se pudo generar el PDF: %s" % (u" | ".join(motivos) or u"?"))
+
+            lleva = PDFM.pdf_lleva(pdf_bytes, ref, tmp) if ref else None
+            if lleva is False:
+                # ⛔ No se sube: publicar un PDF que no lleva su referencia es peor que no
+                #    tenerlo, porque nadie va a volver a mirarlo.
+                raise SystemExit(u"el PDF generado NO lleva la referencia %r dentro: no se sube, "
+                                 u"y el documento hay que mirarlo a mano" % ref)
+            if lleva is None:
+                sys.stderr.write(u"aviso: no se pudo comprobar que el PDF lleve %r dentro "
+                                 u"(¿falta `pdftotext`?); se sube igual\n" % (ref or u"la ref"))
+
+            # ⚠️ En la carpeta del expediente si ya existe; si no, **al lado del original**.
+            #    Esperar a que exista la carpeta dejaría el orden con un bucle: la carpeta la
+            #    crea `publicar`, y `publicar` es justo lo que espera a este PDF.
+            destino = (str(fila.get("drive_folder_id") or "").strip()
+                       or (list(meta.get("parents") or []) or [None])[0])
+            if not destino:
+                raise SystemExit(u"no sé dónde dejar el PDF: ni `drive_folder_id` ni el padre "
+                                 u"del original")
+            nombre = (ref + u".pdf") if ref else (
+                os.path.splitext(str(meta.get("name") or u"documento"))[0] + u".pdf")
+            r = self.drive.files().create(
+                body={"name": nombre, "parents": [destino]},
+                media_body=PDFM.medio_pdf(pdf_bytes),
+                fields="id", supportsAllDrives=True).execute() or {}
+            nid = str(r.get("id") or "").strip()
+            if not nid:
+                raise SystemExit(u"Drive no devolvió el id del PDF: sin él no queda constancia y "
+                                 u"la pasada siguiente generaría otro")
+            return {"drive_primary_file_id": nid}
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def registrar(self, fila):
         """Paso 6: añade la fila al Libro de Datos y devuelve dónde quedó."""
         celda, motivos = LD.fila(fila)
