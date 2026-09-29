@@ -91,6 +91,13 @@ def via(fila):
     return None
 
 
+# ⛔ La columna que bloquea el cierre y **no es una bandera**: el hueco «Revisor/es: ----» vive
+#    DENTRO del documento, no en la hoja, así que ninguna bandera de publicación puede verlo.
+#    📏 Medido en `SOLICITUDES` el 29/09/2026 (CV1:CZ19): la columna lleva **marcas de tiempo**
+#    en 8 filas y un `TRUE` en una — la 18, que es la única que este pipeline tocaría hoy.
+REVISOR_PENDIENTE = "revisor_field_pendiente"
+
+
 def puede_cerrar(fila):
     """`(True, [])` si el expediente puede cerrarse, o `(False, motivos)`.
 
@@ -117,6 +124,17 @@ def puede_cerrar(fila):
         faltan = [b for b in PUBLICACION if not es_si(fila.get(b))]
         if faltan:
             motivos.append(u"aprobado pero sin publicar del todo, falta: %s" % u", ".join(faltan))
+        # ⛔⛔ Y el campo «Revisor/es» del propio documento. No es una bandera de publicación: es
+        #    un hueco DENTRO del PDF, y por eso ninguna de las ocho lo ve. Cowork lo dice en la
+        #    propia hoja — *«Es el unico item que bloquea el cierre del expediente; Cowork NO
+        #    cierra hasta que el revisor este relleno»*— y era justo lo que pasaba con la única
+        #    fila sobre la que este código habría actuado hoy.
+        #    ⚠️ El criterio es **un SÍ**, no «no vacío», y lo decidió quién se pone rojo: esa
+        #       columna lleva marcas de tiempo en 8 filas reales y **cuatro ya están cerradas**.
+        if es_si(fila.get(REVISOR_PENDIENTE)):
+            motivos.append(u"el campo «Revisor/es» del documento sigue sin rellenar "
+                           u"(`%s`): publicarlo y cerrarlo deja el hueco dentro del PDF y "
+                           u"ya no lo mira nadie" % REVISOR_PENDIENTE)
 
     return (not motivos), motivos
 

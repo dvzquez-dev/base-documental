@@ -172,6 +172,52 @@ ok([n for n, _r, _q in av4] == [2, 3],
    "los avisos se ordenan por motivo y no por fila: %r" % ([(n, q[:28]) for n, _r, q in av4],))
 ok(len(av4) >= 2, "debería haber avisos en las dos filas: %r" % (av4,))
 
+# ── EL CAMPO «Revisor/es» BLOQUEA EL CIERRE ─────────────────────
+# ⛔⛔ Esto no es una idea: salió de correr el pipeline contra `SOLICITUDES` de verdad (29/09).
+#    De las 17 filas, **una sola** llegaba a una acción que escribe — la 18, `79E115DB` —, y la
+#    acción era CERRAR. Y esa fila es justo la que Cowork **se niega a cerrar**, con el motivo
+#    escrito en la propia hoja: *«revisor_field_pendiente=TRUE (…) Es el unico item que bloquea el
+#    cierre del expediente; Cowork NO cierra hasta que el revisor este relleno»*. O sea que la
+#    Única fila sobre la que este código habría actuado hoy, la habría cerrado **mal**.
+_REVISOR_OK = dict(REAL_PUBLICADA)
+_REVISOR_PTE = dict(REAL_PUBLICADA, revisor_field_pendiente="TRUE")
+ok(C.puede_cerrar(_REVISOR_OK)[0] is True, u"sin nada pendiente debería poder cerrarse")
+_vale, _mot = C.puede_cerrar(_REVISOR_PTE)
+ok(_vale is False, u"⛔ cierra con el campo «Revisor/es» pendiente: el documento queda publicado "
+                  u"con un «Revisor/es: ----» dentro y ya no lo mira nadie")
+ok(any("Revisor" in m for m in _mot), u"el motivo no dice cuál es el campo: %r" % (_mot,))
+
+# ⛔ Y el criterio es «un SÍ», NO «no vacío» — y eso lo decidió QUIÉN SE PONE ROJO, no el gusto:
+#    esa columna lleva **marcas de tiempo** en 8 filas reales, y **cuatro de ellas ya están
+#    cerradas**. Con «no vacío bloquea», esas cuatro pasarían a «cerrada y no debería» — cuatro
+#    rojos sobre expedientes que Cowork cerró a propósito. Con «un SÍ», el único afectado es el
+#    que lo está de verdad.
+_CON_FECHA = dict(REAL_PUBLICADA, revisor_field_pendiente="2026-07-08T09:08:38+02:00")
+ok(C.puede_cerrar(_CON_FECHA)[0] is True,
+   u"⛔ una MARCA DE TIEMPO en esa columna bloquea el cierre: 4 filas ya cerradas se pondrían "
+   u"en contradicción, y Cowork las cerró a propósito")
+ok(C.puede_cerrar(dict(REAL_PUBLICADA, revisor_field_pendiente=""))[0] is True,
+   u"la columna vacía no debería bloquear nada")
+ok(C.puede_cerrar(dict(REAL_PUBLICADA, revisor_field_pendiente="chusta"))[0] is True,
+   u"un valor que no se entiende no es un SÍ: bloquearía por no saber leer")
+
+# ⚠️ Y sólo en la vía APROBADO: un rechazado no se publica, así que no tiene campo «Revisor/es»
+#    que rellenar, y bloquearlo por eso lo dejaría abierto para siempre.
+_RECHAZADO = fila([T, T, T, T, T, F, T, F, F, F, F, F, F, F, F, F, F, F, F], "R-rechazado")
+ok(C.puede_cerrar(dict(_RECHAZADO, revisor_field_pendiente="TRUE"))[0] is True,
+   u"⛔ un RECHAZADO no se puede cerrar nunca: no hay «Revisor/es» que rellenar en algo que no "
+   u"se publica")
+
+# Y el revisor de la hoja lo canta.
+_avisos = C.revisar([dict(_REVISOR_PTE, closed="FALSE")])
+ok(_avisos == [], u"⚠️ una fila ABIERTA con el revisor pendiente está en regla, y no debe cantar "
+                 u"como «lista para cerrar»: %r" % (_avisos,))
+ok(C.revisar([_REVISOR_PTE]), u"⛔ cerrada Y con el revisor pendiente debería cantar")
+# ⚠️ Y sin la guarda, esa misma fila abierta sale como «lista para cerrar» — que es justo lo
+#    que hacía con la fila 18 de verdad.
+ok(C.revisar([dict(_REVISOR_OK, closed="FALSE")]),
+   u"sin nada pendiente, una publicada y abierta SÍ debería cantar como lista para cerrar")
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

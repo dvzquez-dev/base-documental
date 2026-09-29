@@ -148,6 +148,14 @@ def siguiente(fila):
     if faltan:
         return PUBLICAR, u"aprobada y sin publicar del todo, falta: %s" % u", ".join(faltan)
 
+    # ⛔⛔ Y quien decide si se puede cerrar es `cierre.puede_cerrar`, NO este módulo. Aquí
+    #    había una copia de su criterio —«si no falta ninguna bandera, cerrar»— que coincidía
+    #    con él **por casualidad**: el día que `puede_cerrar` ganó una razón más para negarse
+    #    (el campo «Revisor/es» del documento, que ninguna bandera ve), esta línea siguió
+    #    diciendo CERRAR. Una regla cumplida en dos de sus tres caminos no es una regla.
+    vale, motivos = C.puede_cerrar(fila)
+    if not vale:
+        return REVISAR, (u"publicada entera pero no se puede cerrar: %s" % u"; ".join(motivos))
     return CERRAR, u"aprobada y publicada entera"
 
 

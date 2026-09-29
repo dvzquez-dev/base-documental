@@ -201,6 +201,25 @@ ok(P.cuantas_con_modelo([sin_analizar, sin_analizar, PUBLICADA]) == 2,
    "deberían ser 2 las que necesitan modelo")
 ok(P.cuantas_con_modelo([]) == 0, "una lista vacía no necesita modelo")
 
+# ── EL CIERRE LO DECIDE `puede_cerrar`, NO UNA COPIA DE SU CRITERIO ──────
+# ⛔⛔ `cierre.puede_cerrar` ganó una razón para NO cerrar — el campo «Revisor/es» del documento
+#    sin rellenar, que Cowork respeta y que ninguna bandera ve— y `siguiente` **siguió diciendo
+#    CERRAR**, porque tenía su propio criterio escrito al lado («si no falta ninguna bandera,
+#    cerrar»). Es la avería de «una regla escrita y cumplida en DOS de sus TRES caminos»: la
+#    regla nueva vale en el revisor de la hoja y **no** en el que manda a ejecutar.
+#    📏 Y no es hipotético: corrido contra `SOLICITUDES` de verdad el 29/09, de 17 filas la
+#    Única que llegaba a una acción que escribe era la 18 — y la acción era CERRAR.
+_PTE = sin(PUBLICADA, closed=F)
+_PTE["revisor_field_pendiente"] = "TRUE"
+_a, _p = P.siguiente(_PTE)
+ok(_a != P.CERRAR,
+   u"⛔ cierra un expediente que `puede_cerrar` se niega a cerrar: el criterio está copiado")
+ok(_a == P.REVISAR, u"debería mandarlo a mirar, no dejarlo quieto: toca %r" % (_a,))
+ok("Revisor" in _p, u"el motivo no dice QUÉ falta, y sin eso no es accionable: %r" % (_p,))
+# ⚠️ Y sin nada pendiente sigue cerrando: la guarda no puede parar el camino bueno.
+ok(P.siguiente(sin(PUBLICADA, closed=F))[0] == P.CERRAR,
+   u"una publicada entera y sin pendientes debería cerrarse")
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))
