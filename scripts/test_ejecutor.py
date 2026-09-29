@@ -84,11 +84,32 @@ class Doble(object):
 # ── 1. El mapa de acciones ─────────────────────────────────────────────────────────────────
 # ⛔ Toda acción del pipeline tiene que estar O atendida O declarada quieta. Si no, una acción
 #    nueva se quedaría sin hacer nada y sin decirlo.
+# ⚠️ Tres categorías, no dos: ANOTAR no llama a nadie (el trabajo YA está hecho) pero tampoco
+#    se queda quieta — escribe la marca que faltó. Darle un servicio sería invitar a hacerlo dos
+#    veces, que es justo lo que viene a impedir.
 for a in P.ACCIONES:
-    ok(a in E.ATIENDE or a in E.QUIETAS, "la acción %r no está ni atendida ni declarada quieta" % a)
+    ok(a in E.ATIENDE or a in E.QUIETAS or a == P.ANOTAR,
+       "la acción %r no está ni atendida, ni quieta, ni es ANOTAR" % a)
+ok(P.ANOTAR not in E.ATIENDE, "ANOTAR tiene un servicio: es la puerta a hacer el trabajo dos veces")
+ok(P.ANOTAR not in E.QUIETAS, "ANOTAR no es una acción quieta: escribe la marca que faltó")
 ok(set(E.ATIENDE) & set(E.QUIETAS) == set(), "hay acciones a la vez atendidas y quietas")
-ok(len(E.ATIENDE) + len(E.QUIETAS) == len(P.ACCIONES),
-   "las acciones atendidas y quietas no suman las del pipeline")
+ok(len(E.ATIENDE) + len(E.QUIETAS) + 1 == len(P.ACCIONES),
+   "atendidas + quietas + ANOTAR no suman las acciones del pipeline")
+
+# ⛔ ANOTAR escribe las banderas y NO toca el mundo.
+_d = Doble()
+_r = E.ejecutar_una(sin(PUBLICADA, closed=F, notion_page_created=F, notion_page_id="1a2b"),
+                    _d, aplicar=True)
+ok(_r.accion == P.ANOTAR, "no llega a ANOTAR: %r" % _r.accion)
+ok(_d.llamadas == [], "¡ANOTAR llamó a un servicio! %r" % (_d.llamadas,))
+ok(_r.hecho is True, "ANOTAR debería darse por hecha sin llamar a nadie")
+ok(_r.banderas == ("notion_page_created",),
+   "ANOTAR no marca la bandera que tenía prueba: %r" % (_r.banderas,))
+# En seco tampoco, y dice qué marcaría.
+_r = E.ejecutar_una(sin(PUBLICADA, closed=F, notion_page_created=F, notion_page_id="1a2b"),
+                    Doble())
+ok(_r.seco is True and _r.banderas == ("notion_page_created",),
+   "en seco ANOTAR no dice qué marcaría: %r" % (_r.banderas,))
 # ⚠️ Las que se quedan quietas son decisiones, no olvidos: cada una lleva su por qué escrito.
 ok(all(E.QUIETAS[a].strip() for a in E.QUIETAS), "alguna acción quieta no explica por qué")
 ok(P.ESPERAR in E.QUIETAS and P.REVISAR in E.QUIETAS,

@@ -50,13 +50,31 @@ def sin(base, **kw):
 
 
 # ── 1. Las acciones ────────────────────────────────────────────────────────────────────────
-ok(len(P.ACCIONES) == 8, "deberían ser 8 acciones: %d" % len(P.ACCIONES))
-ok(len(set(P.ACCIONES)) == 8, "hay acciones repetidas en ACCIONES")
+ok(len(P.ACCIONES) == 9, "deberían ser 9 acciones: %d" % len(P.ACCIONES))
+ok(len(set(P.ACCIONES)) == 9, "hay acciones repetidas en ACCIONES")
 # ⛔ Una sola acción necesita modelo. Es el número que justifica todo el reparto, así que se fija.
 ok(P.CON_MODELO == (P.ANALIZAR,),
    "las acciones que necesitan modelo ya no son sólo analizar: %r" % (P.CON_MODELO,))
 ok(len(P.CON_MODELO) == 1, "debería haber exactamente UNA acción con modelo")
 ok(P.ANALIZAR in P.ACCIONES and P.REVISAR in P.ACCIONES, "faltan acciones en la lista")
+
+# ── 1b. ANOTAR: lo que ya está hecho no se rehace ─────────────────────────────────
+# ⛔ Si la página de Notion se creó y la bandera no llegó a escribirse — y acaba de medirse que
+#    una escritura puede no hacer nada y decir que sí —, republicar crea una SEGUNDA página del
+#    mismo documento y nada las marca como duplicadas.
+a, por = P.siguiente(sin(PUBLICADA, closed=F, notion_page_created=F,
+                         notion_page_id="1a2b3c"))
+ok(a == P.ANOTAR, "con la página YA creada debería anotar, no republicar; toca %r" % a)
+ok("notion_page_created" in por, "el por qué no dice qué se anota: %r" % por)
+
+# Sin la prueba, sí toca publicar: una bandera sin identificador no prueba nada.
+a, _ = P.siguiente(sin(PUBLICADA, closed=F, notion_page_created=F, notion_page_id=""))
+ok(a == P.PUBLICAR, "sin identificador debería publicar de verdad; toca %r" % a)
+
+# Y anotar va ANTES que registrar el Libro, aunque falten los dos.
+a, _ = P.siguiente(sin(PUBLICADA, closed=F, base_database_registered=F,
+                       base_database_row="14"))
+ok(a == P.ANOTAR, "con la fila del Libro ya escrita debería anotar; toca %r" % a)
 
 # ── 2. El orden, caso por caso ─────────────────────────────────────────────────────────────
 a, por = P.siguiente(sin(CAMBIOS, analyzed=F, changes_requested=F))

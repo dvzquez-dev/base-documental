@@ -33,6 +33,7 @@ for _f in (sys.stdout, sys.stderr):
     except Exception:  # pragma: no cover
         pass
 
+import evidencias as EV
 import pipeline as P
 
 
@@ -92,6 +93,18 @@ def ejecutar_una(fila, servicios, n=0, aplicar=False):
         rid = str(fila.get("request_id") or "").strip() or rid
 
     accion, porque = P.siguiente(fila)
+
+    # ⛔ ANOTAR no llama a nadie: el trabajo ya está hecho y lo único que falta es la marca.
+    #    Por eso va ANTES del mapa de servicios y no tiene entrada en él: no hay nada que ejecutar,
+    #    y darle un servicio sería invitar a que alguien lo hiciera dos veces.
+    if accion == P.ANOTAR:
+        banderas = EV.ya_hecho(fila)
+        if not banderas:
+            return Resultado(n, rid, accion, porque,
+                             error=u"nada que anotar: la fila no trae ninguna prueba")
+        if not aplicar:
+            return Resultado(n, rid, accion, porque, seco=True, banderas=banderas)
+        return Resultado(n, rid, accion, porque, hecho=True, banderas=banderas)
 
     if accion in QUIETAS:
         return Resultado(n, rid, accion, u"%s (%s)" % (porque, QUIETAS[accion]))

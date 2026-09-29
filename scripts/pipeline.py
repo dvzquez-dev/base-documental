@@ -32,6 +32,7 @@ for _f in (sys.stdout, sys.stderr):
         pass
 
 import cierre as C
+import evidencias as EV
 
 
 # Las acciones que el pipeline sabe hacer, en el orden en que ocurren.
@@ -43,8 +44,10 @@ CERRAR = "cerrar"
 REENVIO = "esperar_reenvio"
 NADA = "nada"
 REVISAR = "revisar_a_mano"
+# ⛔ «El trabajo ya está hecho en el mundo, sólo falta marcarlo». No llama a nadie.
+ANOTAR = "anotar_lo_hecho"
 
-ACCIONES = (ANALIZAR, ESPERAR, PUBLICAR, REGISTRAR, CERRAR, REENVIO, NADA, REVISAR)
+ACCIONES = (ANALIZAR, ESPERAR, PUBLICAR, REGISTRAR, CERRAR, REENVIO, NADA, REVISAR, ANOTAR)
 
 # ⚠️ El único paso que sigue necesitando un modelo. Los demás son deterministas, y por eso el
 #    reparto es «la IA escribe el código, el código ejecuta»: llamar a un modelo para reservar un
@@ -98,6 +101,15 @@ def siguiente(fila):
         return CERRAR, u"rechazada: no hay nada que publicar"
 
     # Aprobada.
+    # ⛔ ANTES de publicar o registrar: si una bandera está sin poner pero su identificador ya
+    #    tiene valor, el trabajo SE HIZO y lo que falló fue anotarlo. Rehacerlo crearía una
+    #    SEGUNDA página de Notion o una segunda carpeta, sin que nada las marque como duplicadas.
+    #    El hueco es real: acaba de medirse que una escritura en Sheets puede no hacer nada y
+    #    decir que sí.
+    anotables = EV.ya_hecho(fila)
+    if anotables:
+        return ANOTAR, u"ya está hecho y sin marcar: %s" % u", ".join(anotables)
+
     faltan = [b for b in C.PUBLICACION if not C.es_si(fila.get(b))]
     if faltan == ["base_database_registered"]:
         return REGISTRAR, u"publicada y sin registrar en el Libro de Datos"
