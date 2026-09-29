@@ -56,10 +56,21 @@ def ejecutable():
     ⛔ Ruta absoluta a propósito: una tarea programada no hereda el `PATH` de tu terminal y
     `claude` a secas fallaría con «no encuentro el ejecutable». El respaldo existe para la
     terminal de quien lo prueba, no para el minipc.
+
+    ⛔⛔ **Y se buscan los DOS nombres, `claude.exe` y `claude`.** Esto nació mirando sólo el
+    `.exe`, que es lo que hay en el PC de Daniel — y el destino declarado es **un minipc, que
+    puede ser Linux**. Allí el `.exe` no existe, así que caía al respaldo del `PATH`… que es
+    justo lo que un `cron` o un `systemd` **tampoco** heredan. O sea: la protección se
+    desactivaba sola **exactamente en la máquina para la que se escribió**, y sin dar ningún
+    error — el fallo saldría como «no encuentro el ejecutable» el día del despliegue.
+    ⚠️ El orden no importa para acertar (sólo existe uno de los dos), pero el `.exe` va primero
+    porque es donde corre hoy.
     """
-    exe = os.path.join(os.path.expanduser("~"), ".local", "bin", "claude.exe")
-    if os.path.exists(exe):
-        return exe
+    base = os.path.join(os.path.expanduser("~"), ".local", "bin")
+    for nombre in ("claude.exe", "claude"):
+        exe = os.path.join(base, nombre)
+        if os.path.isfile(exe):
+            return exe
     return "claude"
 
 

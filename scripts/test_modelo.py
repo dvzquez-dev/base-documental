@@ -21,8 +21,10 @@ banco `probar_gate_lanzar.py`), y las cuatro fallan **callando**:
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 for _f in (sys.stdout, sys.stderr):
@@ -82,6 +84,38 @@ if os.path.exists(_esperado):
        u"resuelve y la rutina falla con «no encuentro el ejecutable»" % (_exe,))
 else:
     ok(_exe == "claude", u"sin el .exe, el respaldo es el PATH: %r" % (_exe,))
+
+# ⛔⛔ Y en LINUX el binario se llama `claude`, sin `.exe`. El destino declarado por Daniel es
+#    **un minipc**, que puede ser Linux; mirando sólo el `.exe` la función se cae al respaldo del
+#    `PATH`, que es justo lo que un `cron` o un `systemd` NO heredan. O sea: la protección se
+#    desactivaba sola **en la máquina para la que se escribió**, y sin dar ningún error.
+_casa = tempfile.mkdtemp()
+_bin = os.path.join(_casa, ".local", "bin")
+os.makedirs(_bin)
+_orig_expand = os.path.expanduser
+try:
+    os.path.expanduser = lambda p: _casa if p == "~" else _orig_expand(p)
+    ok(M.ejecutable() == "claude",
+       u"sin ningún binario en ~/.local/bin, el respaldo es el PATH: %r" % (M.ejecutable(),))
+    _linux = os.path.join(_bin, "claude")
+    open(_linux, "w").close()
+    ok(M.ejecutable() == _linux,
+       u"⛔⛔ en Linux el binario se llama `claude` (sin .exe) y NO lo encuentra (%r): se cae al "
+       u"PATH, que un cron no hereda — la protección se desactiva sola justo en el minipc"
+       % (M.ejecutable(),))
+    _win = os.path.join(_bin, "claude.exe")
+    open(_win, "w").close()
+    ok(M.ejecutable() == _win, u"con los dos, gana el .exe (es donde corre hoy): %r"
+       % (M.ejecutable(),))
+    # ⚠️ Un DIRECTORIO llamado `claude` no es un ejecutable: con `os.path.exists` colaría.
+    os.remove(_win)
+    os.remove(_linux)
+    os.makedirs(os.path.join(_bin, "claude"))
+    ok(M.ejecutable() == "claude",
+       u"⛔ toma un DIRECTORIO por el ejecutable: %r" % (M.ejecutable(),))
+finally:
+    os.path.expanduser = _orig_expand
+    shutil.rmtree(_casa, ignore_errors=True)
 
 # ── 2. La orden ────────────────────────────────────────────────────────────────────────────
 _o = M.orden(u"dime algo", modelo="sonnet")
