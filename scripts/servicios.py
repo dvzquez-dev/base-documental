@@ -386,12 +386,18 @@ class Servicios(object):
         #    bandeja del formulario: la página de Notion apuntaba a algo que no estaba archivado.
         _carpeta = extra.get("drive_folder_id") or str(fila.get("drive_folder_id") or "").strip()
         if str(fila.get("source_drive_file_id") or "").strip() and _carpeta:
-            extra.update(self.mover_a_carpeta(fila, _carpeta))
+            _movido = self.mover_a_carpeta(fila, _carpeta)
+            extra.update(_movido)
+            # ⚠️ El id sale de LO QUE SE MOVIÓ, no de «el principal»: si el adjunto era un DOCX
+            #    se anota en `drive_docx_file_id`, y buscarlo sólo por la otra clave dejaba la
+            #    verificación mirando un `None` y plantando el expediente entero.
+            _id_movido = (_movido.get("drive_primary_file_id")
+                          or _movido.get("drive_docx_file_id"))
             # ⛔ Y se RELEE que esté dentro: `update` puede contestar bien y dejarlo donde estaba.
-            if not self.verificar_en_carpeta(extra.get("drive_primary_file_id"), _carpeta):
+            if not self.verificar_en_carpeta(_id_movido, _carpeta):
                 raise SystemExit("el fichero no consta en la carpeta del expediente tras "
                                  "moverlo: no se da por archivado")
-            self.permiso_dominio(extra.get("drive_primary_file_id"))
+            self.permiso_dominio(_id_movido)
         # ⛔ El resumen ejecutivo va FUERA de esa rama: un expediente sin fichero que mover
         #    tiene resumen igual, y colgarlo de ahí lo dejaba sin archivar sin decir nada.
         if _carpeta and not str(fila.get("drive_summary_file_id") or "").strip():
@@ -526,12 +532,23 @@ class Servicios(object):
         if not (fid and destino):
             raise SystemExit("no se mueve el fichero: falta el de origen (%r) o la carpeta (%r)"
                              % (fid, destino))
-        meta = self.drive.files().get(fileId=fid, fields="parents",
+        meta = self.drive.files().get(fileId=fid, fields="parents,mimeType",
                                       supportsAllDrives=True).execute() or {}
         padres = ",".join(meta.get("parents") or [])
         self.drive.files().update(fileId=fid, addParents=destino, removeParents=padres,
                                   fields="id,parents", supportsAllDrives=True).execute()
-        return {"drive_primary_file_id": fid}
+        # ⛔⛔ `drive_primary_file_id` significa **el PDF**, no «lo que se haya movido».
+        #    Comprobado con la fila 12: sus notas dicen que el PDF bueno es `13A2NAK…`, justo
+        #    lo que trae esa columna. Y lo que se mueve es el adjunto del formulario, que en
+        #    casi todos los expedientes reales es un **DOCX**. Escribir ahí el DOCX no da
+        #    ningún error y deja la columna significando **dos cosas según quién la escribió**,
+        #    que es la peor clase de dato: el que parece bueno.
+        #    ⚠️ Un `mimeType` que no se entiende **no** se da por PDF: fallaría hacia mentir.
+        #    ⬜ Generar el PDF a partir del DOCX **no se hace todavía**: la conversión de Drive
+        #       deja un documento de Google intermedio, y dónde vive eso es decisión de Daniel.
+        if str(meta.get("mimeType") or "").strip().lower() == "application/pdf":
+            return {"drive_primary_file_id": fid}
+        return {"drive_docx_file_id": fid}
 
     def verificar_en_carpeta(self, fichero_id, carpeta_id):
         """¿El fichero está **de verdad** dentro de esa carpeta? Se relee de Drive.

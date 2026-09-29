@@ -122,6 +122,20 @@ def revisar_datos(valores_solicitudes, filas_libro):
         for que in AX.revisar(r):
             lineas.append(u"ANEXOS    fila %d %s — %s" % (i + 2, rid, que))
 
+    # ⛔ Publicado y sin PDF. Casi todos los expedientes llegan en DOCX y **el PDF no lo genera
+    #    nadie todavía**; sin este aviso, un expediente con el DOCX colgado —que Notion no
+    #    previsualiza— queda igual de «completo» que uno con su PDF. Lo que no se hace se dice.
+    for i, r in enumerate(registros):
+        if not C.es_si(r.get("notion_page_created")):
+            continue
+        if str(r.get("drive_primary_file_id") or "").strip():
+            continue
+        if not str(r.get("drive_docx_file_id") or "").strip():
+            continue
+        rid = str(r.get("request_id") or "").strip() or u"(sin request_id)"
+        lineas.append(u"PDF       fila %d %s — publicado con el DOCX y **sin PDF**: Notion no lo "
+                      u"previsualiza, y generarlo no lo hace nadie todavía" % (i + 2, rid))
+
     # Las cadenas de reentrega: una que no se pueda seguir deja el original esperando para
     # siempre un reenvío que ya llegó.
     for nf, rid, que in SU.revisar(registros):

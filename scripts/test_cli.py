@@ -222,6 +222,26 @@ _l, _ = CLI.revisar_datos(
 ok(not [l for l in _l if l.startswith("ANEXOS")],
    u"⛔ canta sobre unos anexos en regla que venían por comas: %r" % (_l,))
 
+# ── Un expediente publicado SIN PDF se ve ─────────────────────
+# ⛔ Casi todos los expedientes llegan en DOCX y **el PDF no lo genera nadie todavía**. Sin
+#    aviso, un expediente se publica con el DOCX colgado — que Notion no previsualiza— y queda
+#    igual de «completo» que uno con su PDF. Es lo mismo que enseñó `SIN_IMPLEMENTAR`: lo que
+#    no se hace se **dice**, no se disimula.
+_CAB5 = ["request_id", "notion_page_created", "drive_docx_file_id", "drive_primary_file_id"]
+_l, _ = CLI.revisar_datos(
+    [_CAB5, ["SOL-D", "TRUE", "1Qgoq3pIdGa29hYzgybJs8Cw0l95-_oCQ", ""]], [])
+ok(any(l.startswith("PDF ") for l in _l), u"⛔ no avisa de un expediente sin PDF: %r" % (_l,))
+ok(any("SOL-D" in l for l in _l), u"no dice de qué expediente es: %r" % (_l,))
+# ⚠️ Con su PDF, callado. Y sin página creada tampoco canta: aún no toca.
+_l, _ = CLI.revisar_datos(
+    [_CAB5, ["SOL-E", "TRUE", "1Qgoq3pIdGa29hYzgybJs8Cw0l95-_oCQ",
+             "13A2NAKagBGH4LXQI6rGasDhr3SFo2LNX"]], [])
+ok(not [l for l in _l if l.startswith("PDF ")], u"canta con el PDF puesto: %r" % (_l,))
+_l, _ = CLI.revisar_datos(
+    [_CAB5, ["SOL-F", "FALSE", "1Qgoq3pIdGa29hYzgybJs8Cw0l95-_oCQ", ""]], [])
+ok(not [l for l in _l if l.startswith("PDF ")],
+   u"⚠️ canta sobre un expediente que aún no se ha publicado: %r" % (_l,))
+
 # ── El repaso canta un id de Drive con basura dentro ──────────────
 _l, _ = CLI.revisar_datos(
     [["request_id", "drive_folder_id", "closed"],

@@ -265,7 +265,10 @@ class Drive(object):
         self.diario = []
         self._p = _Permisos(self.diario, dominio)
         self._f = _Files(self.diario, resp if resp is not None else {"id": "F-nueva"})
+        # ⚠️ Con `mimeType`, como el Drive de verdad cuando se le pide: sin él, el doble era
+        #    más pobre que el real y `mover_a_carpeta` daba el PDF por no-PDF.
         self._f.meta = meta if meta is not None else {"name": "doc.pdf", "size": "1024",
+                                                      "mimeType": "application/pdf",
                                                       "parents": ["F-bandeja"]}
         self._f.datos = datos
 
@@ -725,6 +728,89 @@ _d = S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES
                                           drive_summary_file_id="F-ya"))
 ok([k for a_, k in _dr.diario if a_ == "create"] == [],
    u"⛔ crea un SEGUNDO resumen teniendo ya `drive_summary_file_id`")
+
+# ── `drive_primary_file_id` ES EL PDF, Y SI LO MOVIDO ES UN DOCX NO LO ES ──
+# ⛔⛔ `mover_a_carpeta` escribía en `drive_primary_file_id` **lo que hubiera movido**, y lo que
+#    mueve es el adjunto del formulario — que en casi todos los expedientes reales es un **DOCX**.
+#    Esa columna significa **el PDF** (comprobado con la fila 12: sus propias notas dicen que el
+#    PDF bueno es `13A2NAK…`, justo lo que trae). Escribir ahí un DOCX no da ningún error y deja
+#    la columna significando **dos cosas según quién la escribió**, que es la peor clase de dato.
+class _ConMime(Drive):
+    def __init__(self, mime):
+        Drive.__init__(self)
+        self._mime = mime
+
+    def files(self):
+        f = Drive.files(self)
+        _u = f.update
+
+        def _get(**kw):
+            return _Ejec({"parents": ["F-bandeja"], "mimeType": self._mime, "name": "x"})
+        f.get = _get
+        return f
+
+
+_d = S.Servicios(notion_get=_esq, drive=_ConMime("application/pdf")).mover_a_carpeta(
+    {"source_drive_file_id": "D-1"}, "F-exp")
+ok(_d == {"drive_primary_file_id": "D-1"},
+   u"un PDF movido SÍ es el fichero principal: %r" % (_d,))
+
+_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_d = S.Servicios(notion_get=_esq, drive=_ConMime(_DOCX)).mover_a_carpeta(
+    {"source_drive_file_id": "D-1"}, "F-exp")
+ok(_d.get("drive_primary_file_id") is None,
+   u"⛔ llama «fichero principal» a un DOCX: esa columna es el PDF, y así significa dos cosas "
+   u"según quién la escribió: %r" % (_d,))
+ok(_d.get("drive_docx_file_id") == "D-1",
+   u"el DOCX movido debería quedar anotado en su columna: %r" % (_d,))
+# ⛔⛔ Y `publicar` ENTERO con un DOCX: el caso que faltaba. Sin él, la línea que busca el id
+#    del fichero movido salía **ciega** — con `drive_primary_file_id` a `None`, la verificación
+#    miraba un `None` y el expediente se plantaba en «no consta en la carpeta», que es el
+#    mensaje que manda a buscar un problema de Drive que no existe.
+class _DriveDocx(_ConMime):
+    def __init__(self):
+        _ConMime.__init__(self, _DOCX)
+
+    def files(self):
+        f = _ConMime.files(self)
+        _g = f.get
+
+        def _get(**kw):
+            m = dict(_g(**kw).execute())
+            # Tras el `update`, el doble mueve de verdad: si no, la verificación saldría roja
+            # sobre código correcto.
+            m["parents"] = self._f.meta.get("parents", ["F-bandeja"])
+            m["size"], m["name"] = "1024", "informe.docx"
+            return _Ejec(m)
+        f.get = _get
+        return f
+
+
+_dd = _DriveDocx()
+def _notion_docx(url, cuerpo, token=None):
+    """Contesta lo que toca a cada endpoint: el hueco de subida y la creación de la página."""
+    if url.endswith("/file_uploads"):
+        return {"id": "up-9", "upload_url": "https://notion/sube"}
+    return {"id": "1a2b3c", "url": "https://notion/x"}
+
+
+_d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_docx,
+                 notion_get=lambda u, token=None: {"results": [
+                     {"file": {"file_upload": {"id": "up-9"}}}]},
+                 subir=_subir_ok,
+                 drive=_dd).publicar(dict(FILA, source_drive_file_id="D-docx"))
+ok(_d.get("drive_docx_file_id") == "D-docx",
+   u"⛔ publicando un DOCX no queda anotado dónde fue: %r" % (_d,))
+ok("drive_primary_file_id" not in _d,
+   u"⛔ un DOCX publicado se anota como el PDF principal: %r" % (_d,))
+ok([k for a_, k in _dd.diario if a_ == "perm_create"],
+   u"⛔ el DOCX archivado no se comparte con el dominio: se archiva y nadie puede abrirlo")
+
+# ⚠️ Un mimeType que no se entiende NO se da por PDF: fallaría hacia mentir.
+_d = S.Servicios(notion_get=_esq, drive=_ConMime("")).mover_a_carpeta(
+    {"source_drive_file_id": "D-1"}, "F-exp")
+ok(_d.get("drive_primary_file_id") is None,
+   u"⛔ sin saber qué es, lo da por PDF: %r" % (_d,))
 
 # ── A NOTION SUBE EL PDF, NO EL DOCX QUE MANDÓ EL AUTOR ───────────
 # ⛔⛔ Medido el 29/09: de los 15 expedientes con fichero, **casi todos llegan en DOCX** y el
