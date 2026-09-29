@@ -44,9 +44,17 @@ import analisis as A
 #    conserva los viejos a propósito, porque renombrarlos cambiaría lo que muestran los
 #    documentos de cursos pasados. Esa decisión es de Daniel y está sin tomar.
 UNIDAD_NOTION = {
-    "dinamica_control": "Subsistema de Dinámica&Control",
-    "electronica": "Subsistema de Electrónica",
-    "estructuras_aerodinamica": "Subsistema de Estructuras&Aerodinámica",
+    # ✅ NOMBRES NUEVOS desde el 29/09/2026. Daniel renombró las tres opciones **editando la
+    #    existente**, así que conservan su id y las 76 páginas de temporadas pasadas siguen
+    #    enganchadas: re-medido tras el cambio, **141 páginas y cero sin unidad**, con el reparto
+    #    intacto (23 GNC · 26 Aviónica · 27 Aeroestructuras).
+    # ⛔ Las `unit_key` NO cambian: son claves internas de `RUTAS` y tocarlas rompería lo ya
+    #    archivado. Lo que cambia es sólo el rótulo que Notion enseña.
+    # ⚠️ Dejar aquí el nombre viejo no daría ningún error: Notion **crearía una opción nueva**
+    #    al lado de la buena y partiría la base en dos sin que nadie se enterara.
+    "dinamica_control": "Subsistema de GNC",
+    "electronica": "Subsistema de Aviónica",
+    "estructuras_aerodinamica": "Subsistema de Aeroestructuras",
     "propulsion": "Subsistema de Propulsión",
     "uct": "Unidad de Coordinación Técnica",
     "recovery": "Unidad de Recovery",

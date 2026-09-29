@@ -256,6 +256,14 @@ ok([x[1] for x in _rep[P.REVISAR]][:1] == ["SOL-ORIG"],
 ok(P.siguiente(_ORIG, {})[0] == P.REENVIO, u"con claves vacías debería seguir esperando")
 ok(P.siguiente(_ORIG, None)[0] == P.REENVIO, u"con claves None también")
 
+# ⛔⛔ AQUÍ HUBO UNA REGLA —«la referencia escrita tiene que ser la asignada, si no a
+#    revisar»— Y SE RETIRA CON SU MOTIVO. La escribí con una frase de Daniel y él la corrigió
+#    en el momento: *«si lo detecta siempre, que se lo corrija; no hay fallo»*. Y era peor que
+#    innecesaria: **bloqueaba justo las sustituciones**, que es lo que sí quiere que funcione
+#    — una reentrega trae **a propósito** la referencia ya usada, y esa regla la mandaba a
+#    revisar. Lo que hace falta está en la ficha 715.ª: reusar el `reserved_id` de la
+#    referencia que se sustituye.
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

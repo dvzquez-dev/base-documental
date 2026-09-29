@@ -42,8 +42,12 @@ def base(**kw):
 # 📏 Salen de `one of [...]` del esquema de la base «Documentos internos»
 #    (11eb0e3a-469c-80b9-969f-f0d0e88e2f36). Si Notion cambia, este banco se pone rojo, que es
 #    exactamente lo que tiene que pasar: la traducción dejaría de ser cierta.
-UNIDADES_MEDIDAS = ("Solaris", "Subsistema de Propulsión", "Subsistema de Estructuras&Aerodinámica",
-                    "Subsistema de Dinámica&Control", "Subsistema de Electrónica",
+# 📏 Re-medidas el 29/09/2026 TRAS el renombrado de Daniel: leyendo el esquema vivo y
+#    contando las páginas. **141 en total, cero sin unidad**, y el reparto intacto — 23 GNC,
+#    26 Aviónica, 27 Aeroestructuras —, que es lo que prueba que se editaron las opciones
+#    existentes y no se crearon otras nuevas.
+UNIDADES_MEDIDAS = ("Solaris", "Subsistema de Propulsión", "Subsistema de Aeroestructuras",
+                    "Subsistema de GNC", "Subsistema de Aviónica",
                     "Unidad de Coordinación Técnica", "Unidad de Recovery",
                     "Unidad de Seguridad y Verificación",
                     "Unidad de Patrocinios y Relaciones Externas", "Unidad de Logística")
@@ -71,10 +75,12 @@ ok(tuple(sorted(PN.UNIDAD_NOTION)) == CLAVES_RUTAS,
 
 ok(PN.unidad_de("propulsion") == "Subsistema de Propulsión", "propulsion mal traducida")
 ok(PN.unidad_de("uct") == "Unidad de Coordinación Técnica", "uct mal traducida")
-ok(PN.unidad_de("electronica") == "Subsistema de Electrónica", "electronica mal traducida")
-ok(PN.unidad_de("estructuras_aerodinamica") == "Subsistema de Estructuras&Aerodinámica",
+ok(PN.unidad_de("electronica") == "Subsistema de Aviónica",
+   u"⛔ `electronica` sigue traducida al nombre VIEJO: Notion crearía una opción nueva al "
+   u"lado de la buena y partiría la base en dos sin dar error")
+ok(PN.unidad_de("estructuras_aerodinamica") == "Subsistema de Aeroestructuras",
    "estructuras_aerodinamica mal traducida")
-ok(PN.unidad_de("dinamica_control") == "Subsistema de Dinámica&Control",
+ok(PN.unidad_de("dinamica_control") == "Subsistema de GNC",
    "dinamica_control mal traducida")
 ok(PN.unidad_de("logistica") == "Unidad de Logística", "logistica mal traducida")
 ok(PN.unidad_de("recovery") == "Unidad de Recovery", "recovery mal traducida")

@@ -231,6 +231,61 @@ COLUMNAS = [
 ]
 
 
+# ⛔ Lo que el formulario acepta como «sí» en la pregunta de sustitución. Se mira **sin tildes
+#    y sin caja**, porque la opción del Form se ha reescrito más de una vez y las respuestas
+#    viejas conservan la grafía de entonces.
+_SI = ("si", "sí", "yes", "true", "1")
+
+
+def _plano(t):
+    import unicodedata                                                   # noqa: PLC0415
+    t = unicodedata.normalize("NFD", str(t or "").strip().lower())
+    return u"".join(c for c in t if unicodedata.category(c) != "Mn")
+
+
+def sustitucion_de(respuesta, solicitudes):
+    """Qué sustituye esta respuesta, o `None` si no sustituye nada.
+
+    ⛔⛔ EL CAMINO QUE NO EXISTÍA. Daniel, 29/09: *«que se pueda poner la referencia ya utilizada
+    y que se sustituya»*. El formulario lo pregunta desde siempre — «¿Sustituye o revisa otro
+    documento?», «Indica la referencia del archivo que deseas sustituir» y «Motivo» — y nadie
+    lo leía: `siguiente_id` coge siempre el siguiente libre, así que una reentrega se llevaba un
+    **número nuevo** y quedaba como un documento distinto del que venía a sustituir.
+
+    Devuelve `{reserved_id, replaces_document, replacement_reference, replacement_reason}` — y
+    `motivo_error` cuando dice sustituir algo que **no se puede atar**.
+    ⚠️ Con `motivo_error` **NO trae `reserved_id`**: no se inventa un número ni se deja pasar
+    como documento nuevo. Reservar otro número para algo que dice ser una reentrega es
+    exactamente cómo se acaba con dos expedientes del mismo documento.
+    """
+    respuesta = respuesta if isinstance(respuesta, dict) else {}
+    if _plano(respuesta.get("sustituye")) not in _SI:
+        return None
+
+    ref = str(respuesta.get("referencia_sustituida") or "").strip()
+    motivo = str(respuesta.get("motivo_sustitucion") or "").strip()
+    if not ref:
+        return {"motivo_error": u"dice sustituir otro documento y no dice cuál: sin la "
+                                u"referencia no hay a qué atarlo, y darle número nuevo dejaría "
+                                u"dos expedientes del mismo documento",
+                "replacement_reason": motivo}
+
+    for s_ in (solicitudes or []):
+        if not isinstance(s_, dict):
+            continue
+        if str(s_.get("reference") or "").strip() != ref:
+            continue
+        return {"reserved_id": str(s_.get("reserved_id") or "").strip(),
+                "replaces_document": str(s_.get("request_id") or "").strip(),
+                "replacement_reference": ref,
+                "replacement_reason": motivo}
+
+    return {"motivo_error": u"dice sustituir a %r y no hay ningún expediente con esa "
+                            u"referencia: o está mal escrita o el original no se ingirió nunca"
+                            % ref,
+            "replacement_reference": ref, "replacement_reason": motivo}
+
+
 def fila_solicitud(respuesta, ruta, reserved_id, sufijo, season_label, fecha):
     """El diccionario que se vuelca en `SOLICITUDES`. Sin efectos: sólo construye.
 

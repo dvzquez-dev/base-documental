@@ -21,6 +21,7 @@ Cómo se prueba
 `python scripts/test_pipeline.py` — sin red ni credenciales.
 """
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

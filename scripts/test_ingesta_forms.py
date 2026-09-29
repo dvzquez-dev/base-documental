@@ -164,5 +164,54 @@ _pend = I.pendientes([{"form_row": 17}, {"form_row": "18"}, {"form_row": 19}],
 ok([p["form_row"] for p in _pend] == [19],
    "⚠️ compara `form_row` como TEXTO recortado: si no, se re-ingiere lo ya ingerido")
 
+# ---- SUSTITUCION: la referencia ya usada REUSA su numero -------------------
+# Lo pidio Daniel el 29/09: "que se pueda poner la referencia ya utilizada y que se sustituya".
+# El formulario YA lo pregunta -- "Sustituye o revisa otro documento?", "Indica la referencia
+# del archivo que deseas sustituir" y "Motivo" -- y nadie lo leia: `siguiente_id` coge siempre
+# el siguiente libre, asi que una reentrega se llevaba un NUMERO NUEVO y quedaba como documento
+# distinto. Hoy eso lo arregla Cowork a mano en cada ciclo.
+YA = [
+    {"reference": "Informe_S-2011_27", "reserved_id": "2011", "request_id": "SOL-VIEJA"},
+    {"reference": "Acta_S-6301_27", "reserved_id": "6301", "request_id": "SOL-ACTA"},
+]
+
+r = I.sustitucion_de({"sustituye": "Si", "referencia_sustituida": "Informe_S-2011_27",
+                      "motivo_sustitucion": "errata"}, YA)
+ok(r is not None, "no reconoce una sustitucion declarada con referencia existente")
+ok(r and r.get("reserved_id") == "2011", "no REUSA el numero: %r" % (r,))
+ok(r and r.get("replaces_document") == "SOL-VIEJA", "no anota a quien sustituye: %r" % (r,))
+ok(r and r.get("replacement_reference") == "Informe_S-2011_27", "no anota la referencia")
+ok(r and r.get("replacement_reason") == "errata", "no arrastra el motivo: %r" % (r,))
+ok(r and not r.get("motivo_error"), "una sustitucion buena no deberia dar error")
+
+ok(I.sustitucion_de({"sustituye": "No", "referencia_sustituida": "Informe_S-2011_27"}, YA)
+   is None, "un No no deberia sustituir aunque traiga referencia")
+ok(I.sustitucion_de({}, YA) is None, "sin respuesta no hay sustitucion")
+ok(I.sustitucion_de(None, None) is None, "entradas vacias no revientan")
+
+r = I.sustitucion_de({"sustituye": "Si", "referencia_sustituida": "Informe_S-9999_27"}, YA)
+ok(r is not None and r.get("motivo_error"),
+   "dice sustituir a una referencia que NO existe y pasa callando: %r" % (r,))
+ok(r and r.get("reserved_id") is None,
+   "se inventa un numero para una referencia que no existe: %r" % (r,))
+
+r = I.sustitucion_de({"sustituye": "Si", "referencia_sustituida": ""}, YA)
+ok(r is not None and r.get("motivo_error"), "sustituye sin decir a que, y no se canta")
+# Y el motivo TIENE que ser el de "no dice cual", no el de "no existe": sin esto la guarda
+# salia CIEGA -- con la referencia vacia el bucle tampoco encuentra nada y el caso seguia
+# verde diciendo lo que no era. Mandan a arreglar cosas distintas.
+ok(r and u"no dice cuál" in r.get("motivo_error", ""),
+   "confunde 'no dice cual' con 'no existe': %r" % (r.get("motivo_error"),))
+ok(r and r.get("reserved_id") is None, "sin referencia tampoco se inventa un numero")
+
+# ⚠️ El «Sí» va LITERAL: fabricarlo con `unicode_escape` lo destroza y el caso sale rojo
+#    sobre código correcto, que es como se pierde media hora buscando donde no hay nada.
+for _si in (u"Si", u"Sí", u"SI", u" sí ", u"Yes", u"TRUE"):
+    ok(I.sustitucion_de({"sustituye": _si, "referencia_sustituida": "Acta_S-6301_27"},
+                        YA) is not None, "no entiende %r como que SI sustituye" % _si)
+for _no in (u"No", u"NO", u" no ", u""):
+    ok(I.sustitucion_de({"sustituye": _no, "referencia_sustituida": "Acta_S-6301_27"},
+                        YA) is None, "toma %r por un si" % _no)
+
 print("\n%s  (%d fallo(s))" % ("TODO OK" if not fallos else "HAY FALLOS", len(fallos)))
 sys.exit(1 if fallos else 0)
