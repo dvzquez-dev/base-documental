@@ -177,11 +177,21 @@ class _Files(object):
         self.diario.append(("create", kw))
         return _Ejec(self.resp)
 
+    def get(self, **kw):
+        self.diario.append(("get", kw))
+        return _Ejec(self.meta)
+
+    def get_media(self, **kw):
+        self.diario.append(("get_media", kw))
+        return _Ejec(self.datos)
+
 
 class Drive(object):
-    def __init__(self, resp=None):
+    def __init__(self, resp=None, meta=None, datos=b"PDFDATA"):
         self.diario = []
         self._f = _Files(self.diario, resp if resp is not None else {"id": "F-nueva"})
+        self._f.meta = meta if meta is not None else {"name": "doc.pdf", "size": "1024"}
+        self._f.datos = datos
 
     def files(self):
         return self._f
@@ -347,6 +357,90 @@ except SystemExit:
     _paro = True
 ok(_paro and dr.diario == [] and _ped == [],
    u"⛔ sin carpeta-ruta debería pararse antes de tocar Drive y Notion")
+
+# ── El fichero se sube ANTES de crear la página ──────────────────────────────
+# ⛔ Si se crea primero y la subida falla, queda una página SIN documento y marcada como creada:
+#    el caso que nadie vuelve a mirar.
+_CON_FICHERO = dict(FILA, source_drive_file_id="D-1")
+_subidas = []
+
+
+def _subir_ok(url, datos, nombre, token=None):
+    _subidas.append((url, datos, nombre))
+    return {"status": "uploaded"}
+
+
+def _notion_subida(url, cuerpo, token=None):
+    _pedidos.append((url, cuerpo))
+    if url.endswith("/file_uploads"):
+        return {"id": "up-1", "upload_url": "https://notion/up/1"}
+    return {"id": "1a2b3c", "url": "https://notion/x"}
+
+
+_pedidos = []
+dr = Drive()
+srv = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
+                  drive=dr, subir=_subir_ok)
+_dev = srv.publicar(_CON_FICHERO)
+ok([u for u, _c in _pedidos][0].endswith("/file_uploads"),
+   "⛔ pide el hueco de subida DESPUÉS de crear la página: %r" % ([u for u, _c in _pedidos],))
+ok(_subidas and _subidas[0][1] == b"PDFDATA", "no manda el contenido bajado de Drive")
+ok(_subidas[0][2] == "doc.pdf", "no manda el nombre que dio Drive")
+_crear = [c for u, c in _pedidos if u == S.NOTION_CREAR][0]
+ok(_crear["children"][0]["file"]["file_upload"]["id"] == "up-1",
+   "la página no lleva el fichero subido: %r" % (_crear.get("children"),))
+ok([d[0] for d in dr.diario].count("get_media") == 1, "no baja el fichero de Drive una vez")
+
+# ⛔ El tamaño se mira ANTES de descargar.
+dr = Drive(meta={"name": "gordo.pdf", "size": str(21 * 1024 * 1024)})
+try:
+    S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
+                drive=dr, subir=_subir_ok).publicar(_CON_FICHERO)
+    _paro = False
+except SystemExit as e:
+    _paro = "20 MiB" in str(e)
+ok(_paro, "⛔ un fichero de 21 MiB debería pararse y decir el tope")
+ok("get_media" not in [d[0] for d in dr.diario],
+   "⛔ …y NO haberse bajado: 40 MB para descubrir que no caben es tiempo y RAM tirados")
+
+# ⛔ Si Notion no da hueco (falta `id` o `upload_url`), se para antes de bajar el fichero.
+#    Sin este caso la guarda salía CIEGA: el doble siempre daba los dos.
+for _hueco in ({"id": "up-1"}, {"upload_url": "u"}, {}):
+    _dr = Drive()
+    try:
+        S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
+                    notion=lambda u, c, token=None, _h=_hueco: (
+                        _h if u.endswith("/file_uploads") else {"id": "p"}),
+                    drive=_dr, subir=_subir_ok).publicar(_CON_FICHERO)
+        _paro = False
+    except SystemExit as e:
+        _paro = "hueco" in str(e)
+    ok(_paro, u"⛔ con el hueco de subida a medias (%r) debería pararse" % (_hueco,))
+    ok("get_media" not in [x[0] for x in _dr.diario],
+       u"⛔ …y no haberse bajado el fichero de Drive")
+
+# ⛔ Si la subida no termina, no se crea la página.
+_ped2 = []
+try:
+    S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
+                notion=lambda u, c, token=None: (_ped2.append(u) or
+                                                 ({"id": "up", "upload_url": "u"}
+                                                  if u.endswith("/file_uploads")
+                                                  else {"id": "p"})),
+                drive=Drive(), subir=lambda *a, **k: {"status": "pending"}).publicar(_CON_FICHERO)
+    _paro = False
+except SystemExit as e:
+    _paro = "sin documento" in str(e)
+ok(_paro, "⛔ una subida a medias debería parar antes de crear la página")
+ok(S.NOTION_CREAR not in _ped2, "⛔ …y no haber creado la página")
+
+# ⚠️ Sin fichero de origen, la página se crea igual: no todo expediente trae adjunto.
+_pedidos = []
+dr = Drive()
+_d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
+                 drive=dr, subir=_subir_ok).publicar(FILA)
+ok(_d.get("notion_page_id") == "1a2b3c", "sin fichero debería crearse la página igual")
+ok("get_media" not in [x[0] for x in dr.diario], "sin fichero no debería bajarse nada")
 
 print("%d comprobaciones" % hechas[0])
 if fallos:

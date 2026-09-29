@@ -78,10 +78,20 @@ _a_medias = sin(PUBLICADA, closed=F, notion_pdf_embedded=F, drive_folder_created
 a, por = P.siguiente(_a_medias)
 ok(a == P.REVISAR, "con la página creada y el PDF sin subir debería ir a revisar; toca %r" % a)
 ok("no hace nadie" in por, "el por qué no dice que es algo sin implementar: %r" % por)
-ok("notion_pdf_embedded" in por, "el por qué no dice QUÉ falta: %r" % por)
+# ⚠️ Ya no es `notion_pdf_embedded` — eso se implementó el 699.ª —, así que el caso pide la
+#    que sigue sin hacer nadie. Lo que se comprueba es que el motivo diga **cuál**, no cuál
+#    en concreto: atarlo a una bandera que puede implementarse mañana rompe el banco por una
+#    mejora.
+ok(any(b in por for b in P.SIN_IMPLEMENTAR),
+   "el por qué no dice QUÉ falta, y sin eso no es accionable: %r" % por)
 ok(a != P.PUBLICAR, "¡republica y crearía una segunda página!")
-ok(len(P.SIN_IMPLEMENTAR) == 6, "las banderas sin implementar deberían ser 6: %d"
+ok(len(P.SIN_IMPLEMENTAR) == 5, "las banderas sin implementar deberían ser 5: %d"
    % len(P.SIN_IMPLEMENTAR))
+ok("notion_pdf_embedded" not in P.SIN_IMPLEMENTAR,
+   "⛔ subir el fichero YA está implementado: dejarlo aquí pararía expedientes que se pueden "
+   "terminar")
+ok("notion_embedding_verified" in P.SIN_IMPLEMENTAR,
+   "⛔ …pero VERIFICAR el embebido no: subir no es verificar, y exige releer la página")
 ok("notion_page_created" not in P.SIN_IMPLEMENTAR,
    "crear la página SÍ está implementado: meterlo aquí pararía todo desde el primer documento")
 

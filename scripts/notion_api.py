@@ -125,6 +125,43 @@ def propiedad(nombre, valor):
     return None                                                          # pragma: no cover
 
 
+NOTION_SUBIDAS = "https://api.notion.com/v1/file_uploads"
+
+
+def cuerpo_subida(nombre):
+    """`(cuerpo, motivos)` para pedirle a Notion un hueco de subida.
+
+    📏 **Medido el 29/09/2026 ejecutándolo**: se pide un `file_upload`, se manda el fichero
+    a la URL que devuelve y contesta **HTTP 200** con `status: uploaded`. **No hace falta ninguna
+    URL pública** — lo que refuta la premisa que sostenía el montaje de GitHub Pages **para
+    subir** (para mirar el documento desde fuera de Notion sigue haciendo falta).
+    ⚠️ **Y lo que NO está medido**: se subió un `.txt` pequeño. El límite de esta vía son
+    **20 MiB** y no se ha probado con un PDF grande. Por eso el tamaño se comprueba antes.
+    """
+    motivos = []
+    n = str(nombre or "").strip()
+    if not n:
+        motivos.append(u"sin nombre de fichero: la subida quedaría sin identificar en Notion")
+    if motivos:
+        return None, motivos
+    return {"filename": n, "content_type": "application/pdf"}, []
+
+
+TOPE_SUBIDA = 20 * 1024 * 1024
+
+
+def cabe(tamano):
+    """¿Cabe por la vía de subida directa? El límite son 20 MiB, medido en la documentación.
+
+    ⛔ Se comprueba **antes** de descargar el fichero de Drive: bajarse 40 MB para descubrir que
+    no caben es tiempo y memoria tirados, y el error llegaría con el fichero ya en RAM.
+    """
+    try:
+        return int(tamano) <= TOPE_SUBIDA
+    except (TypeError, ValueError):
+        return False
+
+
 def cuerpo_pagina(data_source_id, propiedades, opciones_etiquetas=None, markdown_source=None):
     """`(cuerpo, avisos)` para crear la página. Con avisos graves, `cuerpo` es `None`.
 

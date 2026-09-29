@@ -136,6 +136,29 @@ def http_notion(url, cuerpo, token=None):
         return json.loads(r.read().decode("utf-8"))
 
 
+def http_subir(url, datos, nombre, token=None):
+    """Manda el fichero a la URL que dio Notion, en `multipart/form-data`.
+
+    📏 **Medido ejecutándolo el 29/09/2026**: contesta HTTP 200 con `status: uploaded`. El
+    campo se llama `file`; con otro nombre, Notion acepta la petición y **no guarda nada**.
+    """
+    import urllib.request                                                # noqa: PLC0415
+    frontera = "----solaris%d" % len(datos)
+    sep = ("\r\n").encode()
+    cuerpo = (b"--" + frontera.encode() + sep
+              + ('Content-Disposition: form-data; name="file"; filename="%s"'
+                 % nombre).encode("utf-8") + sep
+              + b"Content-Type: application/octet-stream" + sep + sep
+              + datos + sep + b"--" + frontera.encode() + b"--" + sep)
+    req = urllib.request.Request(
+        url, data=cuerpo, method="POST",
+        headers={"Authorization": "Bearer %s" % (token or _token_notion()),
+                 "Content-Type": "multipart/form-data; boundary=%s" % frontera,
+                 "Notion-Version": NOTION_VERSION})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 class Servicios(object):
     """Lo que el ejecutor llama. Cada método hace **una** cosa y no decide ninguna.
 
@@ -144,10 +167,13 @@ class Servicios(object):
     sólo ocurre cuando alguien lo pide explícitamente.
     """
 
-    def __init__(self, sheets=None, notion=None, drive=None):
+    def __init__(self, sheets=None, notion=None, drive=None, subir=None):
         self._sheets = sheets
         self._notion = notion or http_notion
         self._drive = drive
+        # El envio del fichero en multipart: aparte del POST de JSON, porque es otra forma de
+        # peticion y el banco necesita doblarla sola.
+        self._subir = subir or http_subir
 
     @property
     def sheets(self):
@@ -258,6 +284,14 @@ class Servicios(object):
             extra["drive_folder_id"] = fid
             extra["drive_folder_url"] = DA.url_de(fid)
 
+        # ⛔ EL FICHERO, ANTES DE CREAR LA PÁGINA. Si se crea primero y la subida falla, queda
+        #    una página **sin documento** y marcada como creada: el caso que nadie vuelve a mirar.
+        subida = self._subir_fichero(fila)
+        if subida:
+            cuerpo["children"] = [{"object": "block", "type": "file",
+                                   "file": {"type": "file_upload",
+                                            "file_upload": {"id": subida}}}]
+
         r = self._notion(NOTION_CREAR, cuerpo) or {}
         pid = str(r.get("id") or "").strip()
         if not pid:
@@ -266,6 +300,41 @@ class Servicios(object):
         extra["notion_page_id"] = pid
         extra["notion_page_url"] = str(r.get("url") or "")
         return extra
+
+    def _subir_fichero(self, fila):
+        """Baja el fichero de Drive y lo sube a Notion. Devuelve el id de la subida, o `None`.
+
+        ⚠️ `None` significa **no había fichero que subir**, y entonces la página se crea sin él.
+        Si había y algo falla, **se lanza**: una página sin documento marcada como publicada es
+        peor que no tenerla.
+        ⛔ El tamaño se mira ANTES de descargar: bajarse 40 MB para descubrir que no caben es
+        tiempo y memoria tirados, y el error llegaría con el fichero ya en RAM.
+        """
+        fid = str(fila.get("source_drive_file_id") or "").strip()
+        if not fid:
+            return None
+        meta = self.drive.files().get(fileId=fid, fields="name,size",
+                                      supportsAllDrives=True).execute() or {}
+        if not NA.cabe(meta.get("size")):
+            raise SystemExit("el fichero pesa %r y el tope de la subida directa son 20 MiB: "
+                             "no se publica a medias" % (meta.get("size"),))
+        nombre = str(meta.get("name") or fila.get("source_filename") or "documento.pdf")
+        cuerpo, motivos = NA.cuerpo_subida(nombre)
+        if cuerpo is None:
+            raise SystemExit("no se sube el fichero: " + " | ".join(motivos))
+        hueco = self._notion(NA.NOTION_SUBIDAS, cuerpo) or {}
+        url = str(hueco.get("upload_url") or "").strip()
+        sid = str(hueco.get("id") or "").strip()
+        if not (url and sid):
+            raise SystemExit("Notion no dio hueco de subida (id o upload_url): no se crea una "
+                             "página sin el documento dentro")
+        datos = self.drive.files().get_media(fileId=fid, supportsAllDrives=True).execute()
+        r = self._subir(url, datos if isinstance(datos, bytes) else bytes(datos or b""),
+                        nombre) or {}
+        if str(r.get("status") or "").lower() != "uploaded":
+            raise SystemExit("la subida no terminó (%r): la página quedaría sin documento"
+                             % (r.get("status"),))
+        return sid
 
     def registrar(self, fila):
         """Paso 6: añade la fila al Libro de Datos y devuelve dónde quedó."""

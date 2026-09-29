@@ -145,6 +145,26 @@ cuerpo, avisos = N.cuerpo_pagina("ds-123", {})
 ok(cuerpo is not None and cuerpo["properties"] == {},
    "un cuerpo sin propiedades debería construirse igual (lo decide quien llama)")
 
+# ── La subida directa: sin URL pública ───────────────────────────────────────
+c, m = N.cuerpo_subida(u"Informe_S-4012_27.pdf")
+ok(m == [] and c == {"filename": u"Informe_S-4012_27.pdf", "content_type": "application/pdf"},
+   "el cuerpo de la subida no es el esperado: %r" % (c,))
+for malo in (u"", u"   ", None):
+    cc, mm = N.cuerpo_subida(malo)
+    ok(cc is None and mm, "un nombre %r no debería valer" % (malo,))
+ok(N.NOTION_SUBIDAS.endswith("/v1/file_uploads"), "el endpoint de subidas no es el de la API")
+
+# ⛔ El tope se mira ANTES de descargar de Drive: bajarse 40 MB para descubrir que no caben es
+#    tiempo y memoria tirados, y el error llegaría con el fichero ya en RAM.
+ok(N.TOPE_SUBIDA == 20 * 1024 * 1024, "el tope ya no son los 20 MiB de la vía de subida")
+ok(N.cabe(1024) is True, "un fichero pequeño debería caber")
+ok(N.cabe(N.TOPE_SUBIDA) is True, "justo el tope debería caber")
+ok(N.cabe(N.TOPE_SUBIDA + 1) is False, "uno por encima del tope NO cabe")
+ok(N.cabe("4600000") is True, "un tamaño en texto debería valer (Drive lo devuelve así)")
+# ⚠️ Un tamaño que no se entiende NO cuenta como que cabe: fallaría a mitad de subida.
+for raro in (None, u"", u"chusta", []):
+    ok(N.cabe(raro) is False, "un tamaño %r debería contar como que NO cabe" % (raro,))
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

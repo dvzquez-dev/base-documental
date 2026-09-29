@@ -58,7 +58,12 @@ CON_MODELO = (ANALIZAR,)
 #    Notion y embeberlo, y las cuatro de Drive. Están escritas aquí y no supuestas, porque lo
 #    contrario — dar por hecho lo que no se hace — es lo que entierra un expediente: con todas
 #    las banderas puestas, `cierre` lo da por publicado y lo cierra.
-SIN_IMPLEMENTAR = ("notion_pdf_embedded", "notion_embedding_verified", "drive_folder_created",
+# ✅ `notion_pdf_embedded` SALIÓ de aquí el 699.ª: el adaptador baja el fichero de Drive, lo
+#    sube a Notion y lo engancha a la página antes de crearla. Lo hace de verdad, así que
+#    dejarlo en esta lista habría parado expedientes que ya se pueden terminar.
+# ⚠️ `notion_embedding_verified` SE QUEDA: subir no es verificar, y comprobarlo exige releer
+#    la página. Es la misma distinción que tumbó `drive_primary_file_verified`.
+SIN_IMPLEMENTAR = ("notion_embedding_verified", "drive_folder_created",
                    "drive_primary_file_verified", "drive_summary_created",
                    "domain_permission_verified")
 

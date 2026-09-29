@@ -124,7 +124,7 @@ for a, (_n, bs) in sorted(E.ATIENDE.items()):
 #    mentira**: habría escrito «PDF embebido» y «carpeta de Drive creada» sin que pasara nada,
 #    y con las siete puestas `cierre` habría dado el expediente por publicado y lo habría
 #    cerrado. Un documento sin fichero en Drive, marcado cerrado, que nadie vuelve a mirar.
-ok(E.ATIENDE[P.PUBLICAR][1] == ("notion_page_created",),
+ok(E.ATIENDE[P.PUBLICAR][1] == ("notion_page_created", "notion_pdf_embedded"),
    "publicar promete más banderas de las que hace: %r" % (E.ATIENDE[P.PUBLICAR][1],))
 ok(not set(E.ATIENDE[P.PUBLICAR][1]) & set(P.SIN_IMPLEMENTAR),
    "publicar promete alguna de las que NADIE implementa todavía")
