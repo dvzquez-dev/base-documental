@@ -1006,6 +1006,89 @@ ok(S.Servicios(notion_get=_hijos_con_anexos, notion_patch=_patch_ok)
 ok(S.Servicios(notion_get=_hijos_con_anexos, notion_patch=_patch_ok)
   .enlazar_anexos("p-1", []) is False, u"sin anexos no hay nada que enlazar")
 
+# ── LA FUENTE DE DATOS SE DEDUCE, NO SE PIDE ───────────────────
+# ⛔⛔ `NOTION_DATA_SOURCE_ID` era un secreto más que alguien tenía que ir a buscar — y para
+#    pedirlo hace falta el token, que GitHub **no devuelve nunca**, así que sacarlo obligaba a
+#    rotar una credencial para leer un identificador **que no es secreto**.
+#    ✅ El id de la BASE ya está a la vista en el repo (`sync-notion.mjs`), y el de la fuente se
+#    deduce de él con la misma llamada que ya se hace para leer las opciones de «Etiquetas».
+_ESQ_BASE = {"data_sources": [{"id": "ds-deducida", "name": "Documentos internos"}]}
+_pedidas = []
+
+
+def _get_base(url, token=None):
+    _pedidas.append(url)
+    return _ESQ_BASE
+
+
+_g = os.environ.pop("NOTION_DATA_SOURCE_ID", None)
+try:
+    _srv = S.Servicios(notion_get=_get_base)
+    ok(_srv.fuente_de_datos() == "ds-deducida",
+       u"⛔ no deduce la fuente a partir del id de la base: %r" % (_srv.fuente_de_datos(),))
+    # ⛔ El id va ESCRITO AQUÍ, no leído de la constante: comparar la constante consigo misma
+    #    sale verde aunque alguien la cambie por otra base — lo dijo la mutación, que salió ciega.
+    #    Este es el de «Documentos internos», el mismo que lleva `sync-notion.mjs` desde antes.
+    ok(_pedidas and "11eb0e3a469c80b9969ff0d0e88e2f36" in _pedidas[0],
+       u"no pregunta por la base de «Documentos internos»: %r" % (_pedidas,))
+    # ⚠️ Una sola vez: una pasada de 40 expedientes no puede preguntarlo 40 veces.
+    _antes = len(_pedidas)
+    _srv.fuente_de_datos()
+    ok(len(_pedidas) == _antes, u"⚠️ lo vuelve a preguntar en cada llamada")
+
+    # ⛔ Con VARIAS fuentes no se adivina: publicar en la que no es reparte la base en dos.
+    _srv2 = S.Servicios(notion_get=lambda u, token=None: {"data_sources": [
+        {"id": "a", "name": "una"}, {"id": "b", "name": "otra"}]})
+    try:
+        _srv2.fuente_de_datos()
+        _paro = False
+    except SystemExit as e:
+        _paro = "2" in str(e) and "NOTION_DATA_SOURCE_ID" in str(e)
+    ok(_paro, u"⛔ con dos fuentes elige una a dedo en vez de pedir que se diga cuál")
+
+    # ⛔ Y si Notion no contesta lo que se espera, se para: publicar sin saber en qué base
+    #    crea la página donde no toca, y eso no se deshace.
+    for _malo in ({}, {"data_sources": []}, {"object": "error", "code": "unauthorized"}):
+        try:
+            S.Servicios(notion_get=lambda u, token=None, _m=_malo: _m).fuente_de_datos()
+            _paro = False
+        except SystemExit:
+            _paro = True
+        ok(_paro, u"⛔ con la respuesta %r debería pararse y decirlo" % (_malo,))
+finally:
+    if _g is not None:
+        os.environ["NOTION_DATA_SOURCE_ID"] = _g
+
+    # ⚠️ Y `publicar` la deduce sola: sin este caso, la línea que la llama sale CIEGA — el
+    #    fixture trae `notion_data_source_id` y nunca se llegaba a preguntar.
+    _dr = Drive()
+    _vistos = []
+
+    def _get_pub(url, token=None):
+        _vistos.append(url)
+        return _ESQ_BASE if "/databases/" in url else {}
+
+    _fila_sin = dict(FILA)
+    _fila_sin.pop("notion_data_source_id", None)
+    _cuerpos = []
+    S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
+                notion=lambda u, c, token=None: _cuerpos.append(c) or {"id": "p", "url": "u"},
+                notion_get=_get_pub, drive=_dr).publicar(_fila_sin)
+    ok(_cuerpos and _cuerpos[0]["parent"]["data_source_id"] == "ds-deducida",
+       u"⛔ `publicar` no deduce la fuente: publicaría sin saber en qué base: %r"
+       % (_cuerpos[0].get("parent") if _cuerpos else None,))
+
+# ⚠️ Y la variable, si está puesta, MANDA: es la salida de emergencia si algún día la base
+#    tiene dos fuentes o hay que publicar en otra.
+os.environ["NOTION_DATA_SOURCE_ID"] = "ds-a-mano"
+try:
+    _pedidas2 = []
+    ok(S.Servicios(notion_get=lambda u, token=None: _pedidas2.append(u) or _ESQ_BASE)
+       .fuente_de_datos() == "ds-a-mano", u"la variable debería mandar sobre lo deducido")
+    ok(_pedidas2 == [], u"⚠️ con la variable puesta no hace falta preguntarle nada a Notion")
+finally:
+    del os.environ["NOTION_DATA_SOURCE_ID"]
+
 # ── LA VERSIÓN DE LA API Y LA FORMA DEL CUERPO TIENEN QUE CUADRAR ─────
 # ⛔⛔ `notion_api.cuerpo_pagina` manda `parent = {"type": "data_source_id", …}`, que es la
 #    forma de las bases **multi-fuente**; esa forma **no existe** en `2022-06-28`, donde el

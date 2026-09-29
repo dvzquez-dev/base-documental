@@ -76,7 +76,13 @@ jobs:
           #    puesto — de los que cuestan una hora.
           GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          # ⚠️ YA NO HACE FALTA: la fuente se DEDUCE del id de la base, que vive a la
+          #    vista en `sync-notion.mjs`. Se deja como salida de emergencia para el día
+          #    que la base tenga dos fuentes o haya que publicar en otra. Vacío = deducir.
           NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+          # Y la base, también por si algún día es otra. Vacío = la de «Documentos
+          # internos» que lleva escrita `servicios.NOTION_BASE_DOCS`.
+          NOTION_BASE_DOCS: ${{ vars.NOTION_BASE_DOCS }}
           # ⛔ `DOMINIO_EQUIPO` no es un secreto, pero SIN ELLA la publicación se para en
           #    seco: `permiso_dominio` se niega a compartir con "", que no comparte con
           #    nadie. Faltaba, y el fallo habría sido «falta la variable» con todos los

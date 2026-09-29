@@ -76,6 +76,14 @@ NOTION_VERSION = "2025-09-03"
 NOTION_CREAR = "https://api.notion.com/v1/pages"
 NOTION_HIJOS = "https://api.notion.com/v1/blocks/%s/children"
 NOTION_FUENTE = "https://api.notion.com/v1/data_sources/%s"
+NOTION_BASE = "https://api.notion.com/v1/databases/%s"
+
+# ⛔ La base «Documentos internos». **No es un secreto**: está escrita a la vista en
+#    `scripts/sync-notion.mjs` desde antes de todo esto, y es un identificador, no una credencial.
+#    De aquí se DEDUCE la fuente de datos, para no obligar a nadie a ir a buscar un secreto más —
+#    y para pedirlo haría falta el token, que GitHub **no devuelve nunca**: sacarlo obligaba a
+#    **rotar una credencial** para leer un id que no lo es.
+NOTION_BASE_DOCS = "11eb0e3a469c80b9969ff0d0e88e2f36"
 
 # ⚠️ Drive entero, no `readonly`: hay que CREAR la carpeta del expediente. Es el mismo
 #    alcance que ya piden `publish_temp_pdfs.py` y `fix_docx_publication_date.py`.
@@ -232,6 +240,8 @@ class Servicios(object):
         # Las opciones de «Etiquetas», leídas UNA vez: una pasada de 40 expedientes no puede
         # pedir el esquema 40 veces. `None` = todavía no se ha mirado; `[]` = se miró y no hay.
         self._opc_etq = None
+        # La fuente de datos, deducida una vez por pasada.
+        self._fuente = None
 
     @property
     def sheets(self):
@@ -306,6 +316,38 @@ class Servicios(object):
         raise SystemExit("`analizar` es el paso del modelo y no vive en el adaptador: hoy lo "
                          "sigue haciendo Cowork. Esta pasada NO debe marcarlo como hecho")
 
+    def fuente_de_datos(self):
+        """El `data_source_id` donde se publica. De la variable, o **deducido de la base**.
+
+        ⛔ `NOTION_DATA_SOURCE_ID` sigue mandando si está puesta — es la salida de emergencia
+        para el día que la base tenga dos fuentes o haya que publicar en otra. Pero **no hace
+        falta**: el id de la base ya vive a la vista en el repo y la fuente sale de él.
+        ⚠️ Con **varias** fuentes no se adivina: publicar en la que no es parte la base en dos
+        y eso no se deshace. Se para y se pide que se diga cuál.
+        """
+        a_mano = str(os.environ.get("NOTION_DATA_SOURCE_ID", "")).strip()
+        if a_mano:
+            return a_mano
+        if self._fuente:
+            return self._fuente
+        base = str(os.environ.get("NOTION_BASE_DOCS", "") or NOTION_BASE_DOCS).strip()
+        r = self._notion_get(NOTION_BASE % base) or {}
+        fuentes = [f for f in (r.get("data_sources") or [])
+                   if str((f or {}).get("id") or "").strip()]
+        if not fuentes:
+            raise SystemExit(
+                "Notion no devolvió ninguna fuente de datos para la base %s (%r): sin ella no se "
+                "sabe dónde crear la página. Si la base es otra, ponla en `NOTION_BASE_DOCS`; si "
+                "la API no entiende `data_sources`, hace falta `NOTION_DATA_SOURCE_ID`"
+                % (base, r.get("code") or r.get("object")))
+        if len(fuentes) > 1:
+            raise SystemExit(
+                "la base %s tiene %d fuentes de datos (%s): publicar en la que no es parte la "
+                "base en dos y no se deshace. Di cuál en `NOTION_DATA_SOURCE_ID`"
+                % (base, len(fuentes), ", ".join(str(f.get("name")) for f in fuentes)))
+        self._fuente = str(fuentes[0].get("id")).strip()
+        return self._fuente
+
     def opciones_etiquetas(self, fuente=None):
         """Los nombres de las opciones que **ya tiene** «Etiquetas» en Notion. Lista, o `[]`.
 
@@ -340,8 +382,8 @@ class Servicios(object):
         props, motivos = PN.propiedades(fila)
         if motivos:
             raise SystemExit("no se publica: " + " | ".join(motivos))
-        _fuente = (fila.get("notion_data_source_id") or
-                   os.environ.get("NOTION_DATA_SOURCE_ID", ""))
+        _fuente = (str(fila.get("notion_data_source_id") or "").strip()
+                   or self.fuente_de_datos())
         # ⛔ Con las opciones que YA hay: sin ellas, `casar_etiquetas` no puede reusar nada y
         #    cada `Python` crea una opción al lado de `python`.
         cuerpo, avisos = NA.cuerpo_pagina(
