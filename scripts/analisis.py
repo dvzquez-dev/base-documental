@@ -180,8 +180,13 @@ def revisar_analisis(calidad, tags_json):
 MIN_RESUMEN = 20
 
 
-def prompt_de(fila):
-    """El encargo del paso 2, con los datos del expediente dentro.
+def prompt_de(fila, texto=None):
+    """El encargo del paso 2, con los datos del expediente **y el documento** dentro.
+
+    ⛔ **`texto` es el contenido del documento, y sin él esto es adivinar por el título.** Nació
+    sin ese argumento y el resumen ejecutivo salía de los metadatos: se lee bien, no dice nada, y
+    el revisor ya veía el título. Quien llama es `servicios.analizar`, que lo baja de Drive con
+    `documento.texto_de` — y **se planta** si no hay texto, en vez de pedir un resumen a ciegas.
 
     ⛔ **Nombra el título, el tipo y la unidad**: sin eso el modelo resume a ciegas y el resumen
     sale genérico, que es exactamente lo que el revisor no necesita.
@@ -222,8 +227,15 @@ def prompt_de(fila):
         u"\n"
         u"Si la severidad es \"media\" o \"alta\", tiene que venir con al menos un aviso que la\n"
         u"justifique. No añadas texto fuera del JSON.\n"
+        u"\n"
+        u"DOCUMENTO\n"
+        u"%s\n"
         % (_c("reference"), _c("doc_title"), _c("doc_type"), _c("unit_label"),
-           _c("author_name"), _c("season"), u'", "'.join(NIVELES))
+           _c("author_name"), _c("season"), u'", "'.join(NIVELES),
+           # ⚠️ El aviso va DENTRO del encargo, no sólo en la consola: si el documento no se
+           #    pudo leer, el modelo tiene que saber que no lo tiene — si no, se lo inventa.
+           str(texto or u"").strip()
+           or u"(no se ha podido leer el documento: NO inventes su contenido)")
     )
 
 

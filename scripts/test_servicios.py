@@ -378,7 +378,27 @@ ok(_paro and sh.diario == [],
 #    se puso rojo al implementarlo — y **el rojo tenía razón a medias**: lo que protegia no era
 #    negarse, era **no dar por analizado lo que no lo está**. Eso es lo que se vigila ahora.
 #    ⚠️ Se re-apunta en vez de borrarlo, y con su motivo escrito, para que nadie lo reponga.
+import io as _io
 import modelo as _M
+import zipfile as _zf
+
+# ⛔ Desde el 30/09 `analizar` BAJA EL DOCUMENTO y lo mete en el encargo: sin él el resumen sale
+#    de adivinar por el título. Así que el caso necesita un `.docx` de verdad, no un `b"PDFDATA"`
+#    — un doble más pobre que el real es como se cuela un camino que en producción revienta.
+def _docx_de(parrafos):
+    _buf = _io.BytesIO()
+    _cuerpo = u"".join(u"<w:p><w:r><w:t>%s</w:t></w:r></w:p>" % _p for _p in parrafos)
+    with _zf.ZipFile(_buf, "w") as _z:
+        _z.writestr("word/document.xml",
+                    (u'<?xml version="1.0"?><w:document><w:body>%s</w:body></w:document>'
+                     % _cuerpo).encode("utf-8"))
+    return _buf.getvalue()
+
+
+_DOCX_DE_MENTIRA = _docx_de([u"Ensayo est\xe1tico del motor Hélice.",
+                             u"Se midi\xf3 el empuje durante 12 s."])
+# La fila que SÍ tiene fichero que analizar.
+_PARA_ANALIZAR = dict(FILA, source_drive_file_id="F-doc", source_filename="informe.docx")
 
 
 def _falso_modelo(respuesta):
@@ -394,7 +414,8 @@ _orig = _falso_modelo({"ok": True, "datos": {
     "etiquetas": [u"aviónica"], "severidad": "media",
     "avisos": [u"Falta la fecha de publicación"]}})
 try:
-    _cols = S.Servicios(notion_get=_esq, sheets=Sheets({})).analizar(FILA)
+    _cols = S.Servicios(notion_get=_esq, sheets=Sheets({}),
+                        drive=Drive(datos=_DOCX_DE_MENTIRA)).analizar(_PARA_ANALIZAR)
     ok(_cols.get("analyzed") == "TRUE",
        u"con un análisis entero, `analizar` debería marcar la bandera: %r" % (_cols,))
     ok(_cols.get("executive_summary"), u"no devuelve el resumen ejecutivo: %r" % (_cols,))
@@ -411,7 +432,8 @@ for _resp, _que in (
                                 "severidad": "CHUNGO"}}, u"sin severidad reconocible")):
     _orig = _falso_modelo(_resp)
     try:
-        S.Servicios(notion_get=_esq, sheets=Sheets({})).analizar(FILA)
+        S.Servicios(notion_get=_esq, sheets=Sheets({}),
+                    drive=Drive(datos=_DOCX_DE_MENTIRA)).analizar(_PARA_ANALIZAR)
         _paro = False
     except SystemExit:
         _paro = True
@@ -419,6 +441,27 @@ for _resp, _que in (
         _M.preguntar = _orig
     ok(_paro, u"⛔⛔ `analizar` da por analizado un expediente %s: el revisor abriría la ficha "
               u"sin resumen ni avisos, que es lo que tiene que leer antes de aprobar" % _que)
+
+# ⛔⛔ SIN FICHERO NO SE ANALIZA, y no es lo mismo que "el modelo no contestó": aquí no hay
+#    nada que leer. Resumir los metadatos daría un texto que se lee bien y no dice nada, y el
+#    revisor lo leería como si saliera del documento.
+try:
+    S.Servicios(notion_get=_esq, sheets=Sheets({}),
+                drive=Drive(datos=_DOCX_DE_MENTIRA)).analizar(FILA)
+    _paro = False
+except SystemExit as _e:
+    _paro = u"fichero" in str(_e)
+ok(_paro, u"⛔⛔ analiza un expediente SIN fichero: el resumen saldría de adivinar por el título")
+
+# ⛔ Y con un fichero que no se puede leer (un PDF), también se planta y DICE por qué.
+try:
+    S.Servicios(notion_get=_esq, sheets=Sheets({}),
+                drive=Drive(datos=b"%PDF-1.7 esto es un pdf")).analizar(
+                    dict(_PARA_ANALIZAR, source_filename="informe.pdf"))
+    _paro = False
+except SystemExit as _e:
+    _paro = u"PDF" in str(_e)
+ok(_paro, u"⛔ con un PDF debería plantarse diciendo que no lo sabe leer, no resumir a ciegas")
 
 # ⚠️ Y el doble se deshace: dejarlo puesto haría que todo lo de abajo midiera un modelo de
 #    mentira sin decirlo.

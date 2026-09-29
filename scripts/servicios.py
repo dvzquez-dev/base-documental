@@ -380,9 +380,28 @@ class Servicios(object):
         expedientes siguen.
         """
         import analisis as A
+        import documento as DOC
         import modelo as M
 
-        r = M.preguntar(A.prompt_de(fila))
+        # ⛔ El documento va DENTRO del encargo. Sin él el resumen sale de adivinar por el
+        #    título —que el revisor ya ve— y se lee perfectamente sin decir nada.
+        fid = (str(fila.get("source_drive_file_id") or "").strip()
+               or str(fila.get("drive_primary_file_id") or "").strip())
+        if not fid:
+            raise SystemExit(u"no hay fichero que analizar: ni `source_drive_file_id` ni "
+                             u"`drive_primary_file_id`")
+        datos = self.drive.files().get_media(fileId=fid, supportsAllDrives=True).execute()
+        texto, motivos = DOC.texto_de(str(fila.get("source_filename") or ""),
+                                      datos if isinstance(datos, bytes)
+                                      else bytes(datos or b""))
+        if texto is None:
+            # ⛔ Plantarse, no resumir a ciegas: un resumen inventado se publica igual y el
+            #    revisor lo lee como si fuera del documento.
+            raise SystemExit(u"no se pudo leer el documento: %s" % (u" | ".join(motivos) or u"?"))
+        for m in motivos:
+            sys.stderr.write(u"aviso: %s\n" % m)
+
+        r = M.preguntar(A.prompt_de(fila, texto))
         if not r.get("ok"):
             raise SystemExit(u"el análisis no se pudo hacer: %s" % (r.get("motivo") or u"?"))
 
