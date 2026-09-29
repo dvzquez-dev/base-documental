@@ -117,10 +117,25 @@ def etiquetas(valor):
     motivos = []
     brutas = valor
     if isinstance(valor, (str, bytes)):
+        crudo = valor.decode("utf-8", "replace") if isinstance(valor, bytes) else valor
+        txt = crudo.strip()
+        if not txt:
+            return [], []
         try:
-            brutas = json.loads(valor)
+            brutas = json.loads(txt)
         except Exception:
-            return [], [u"`tags_json` no es JSON válido: %r" % (valor,)]
+            # ⛔⛔ La columna se llama `tags_json` y **miente en una fila de quince**. Medido en
+            #    `SOLICITUDES` el 29/09/2026: 14 filas traen una lista JSON y la 8
+            #    (`SOL-DOC-20260706-202210-1I8XUUNL`) trae las etiquetas **separadas por comas**.
+            #    Con el lector estricto esa fila se publicaba con **0 etiquetas de 19**: el
+            #    documento queda archivado y **no sale en ninguna búsqueda**. Se lee lo que hay.
+            #    ⚠️ Pero un JSON **roto** sigue siendo un error: leerlo «como se pueda»
+            #       convertiría `["a", "b"` en etiquetas llamadas `["a"` y `"b"`.
+            if txt[:1] in ("[", "{"):
+                return [], [u"`tags_json` empieza como JSON y no lo es: %r" % (crudo,)]
+            brutas = txt.split(",")
+            motivos.append(u"`tags_json` no venía en JSON sino separado por comas; se han leído "
+                           u"%d etiquetas" % len([x for x in brutas if x.strip()]))
     if brutas is None:
         return [], []
     if not isinstance(brutas, list):

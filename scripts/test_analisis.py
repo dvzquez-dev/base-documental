@@ -103,8 +103,14 @@ ok(etq == ["informe"], "no deduplica ignorando la caja: %r" % (etq,))
 etq, m = A.etiquetas(u'["", "  ", null, "buena"]')
 ok(etq == ["buena"], "no quita vacíos ni nulos: %r" % (etq,))
 
+# ⛔⛔ ESTE CASO FIJABA LA VERSIÓN ESTRICTA, y la estricta perdía 19 etiquetas de una fila
+#    REAL. Pedía que **cualquier** cosa que no fuera JSON se tirara; medido el 29/09, una de
+#    las quince filas con etiquetas las trae **separadas por comas**. Se retira con su motivo
+#    y se sustituye por lo que de verdad hay que exigir: que **se diga en qué formato venía**.
 etq, m = A.etiquetas("esto no es json")
-ok(etq == [] and m and "JSON" in m[0], "un tags_json inválido debería decirse: %r" % (m,))
+ok(etq == ["esto no es json"],
+   "una cadena sin comas es UNA etiqueta, no un error: %r" % (etq,))
+ok(m and "coma" in m[0], "no deja constancia del formato: %r" % (m,))
 etq, m = A.etiquetas(u'{"no":"soy lista"}')
 ok(etq == [] and m and "lista" in m[0], "un tags_json que no es lista debería decirse")
 ok(A.etiquetas(None) == ([], []), "None no debería dar motivos")
@@ -161,6 +167,45 @@ ok(norm["severidad"] is None and norm["avisos"] == [] and norm["etiquetas"] == [
    "una celda vacía debería dar todo vacío sin reventar: %r" % (norm,))
 norm, _m = A.revisar_analisis(None, None)
 ok(norm["severidad"] is None, "None no debería reventar")
+
+# ── `tags_json` NO SIEMPRE ES JSON ──────────────────────────
+# 📏 Medido en `SOLICITUDES` el 29/09/2026: de las 15 filas con etiquetas, **14 traen una
+#    lista JSON y UNA trae las etiquetas separadas por comas** — la fila 8,
+#    `SOL-DOC-20260706-202210-1I8XUUNL`. Con el lector estricto, esa fila se publicaría con
+#    **CERO etiquetas de 19**: el documento queda archivado y **no sale en ninguna búsqueda**.
+#    ⚠️ El nombre de la columna dice `_json` y **miente en una fila de quince**. Se lee lo que
+#       hay, no lo que la columna promete.
+_COMAS = (u"informe, general, mayo, UCT, Viradinha MKII, simulaciones, EuRoC, SPP, SVB, "
+          u"Ampliacion, Mallado, servomotor, sistema de control, EKF/ESKF, MPC, RocketPy, "
+          u"Monte Carlo, aerofrenos, software")
+_et, _mot = A.etiquetas(_COMAS)
+ok(len(_et) == 19, u"⛔ pierde las 19 etiquetas de la fila real: %r" % (_et,))
+ok(_et[:4] == [u"informe", u"general", u"mayo", u"UCT"],
+   u"no recorta los espacios: %r" % (_et[:4],))
+ok(u"Monte Carlo" in _et, u"⚠️ parte por comas, no por espacios: «Monte Carlo» es UNA etiqueta")
+ok(any("coma" in m for m in _mot),
+   u"no deja constancia de que esa fila viene en otro formato: %r" % (_mot,))
+
+# ⛔ Y un JSON ROTO sigue siendo un error, no una lista por comas: leerlo «como se pueda»
+#    convertiría `["a", "b"` en etiquetas llamadas `["a"` y `"b"`.
+for roto in (u'["a", "b"', u'[1, 2', u'{"informe": 1'):
+    _e, _m = A.etiquetas(roto)
+    ok(_e == [] and _m, u"⛔ un JSON roto %r debería seguir siendo un error: %r" % (roto, _e))
+    ok(any("JSON" in m for m in _m), u"el motivo de %r no dice que el JSON está roto: %r"
+       % (roto, _m))
+    ok(not any("coma" in m for m in _m),
+       u"⛔ %r se leyó como lista por comas: `[\"a\"` y `\"b\"` serían dos etiquetas" % (roto,))
+# Un JSON válido que no es una lista también se rechaza, y por su motivo propio.
+_e, _m = A.etiquetas(u'{"a": 1}')
+ok(_e == [] and any("lista" in m for m in _m),
+   u"un objeto JSON debería rechazarse diciendo que no es una lista: %r" % (_m,))
+
+# Y lo de siempre sigue igual.
+ok(A.etiquetas(u'["informe","mayo"]')[0] == [u"informe", u"mayo"], u"el JSON bueno debería seguir")
+ok(A.etiquetas(u'[]') == ([], []), u"una lista JSON vacía no da etiquetas ni motivos")
+ok(A.etiquetas(u"") == ([], []), u"una celda vacía no da etiquetas ni motivos")
+ok(A.etiquetas(u"   ") == ([], []), u"sólo espacios tampoco")
+ok(A.etiquetas(u"informe")[0] == [u"informe"], u"una sola etiqueta sin comas debería valer")
 
 print("%d comprobaciones" % hechas[0])
 if fallos:

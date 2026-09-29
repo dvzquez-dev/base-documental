@@ -177,6 +177,37 @@ ok(len(m) == 5, "con los cinco campos malos deberían salir 5 motivos, salen %d"
 p, m = PN.propiedades({})
 ok(p is None and len(m) == 5, "un expediente vacío debería dar 5 motivos sin reventar")
 
+# ── LAS ETIQUETAS SALEN DE `tags_json`, QUE ES LA COLUMNA QUE EXISTE ─────
+# ⛔⛔ Esto leía `expediente["tags"]` — una clave que **no existe en `SOLICITUDES`**. La columna
+#    real se llama `tags_json`. O sea que **ninguna página publicada llevaba etiquetas**, y
+#    `analisis.etiquetas` (68 comprobaciones) y `notion_api.casar_etiquetas` (la máquina de no
+#    duplicar opciones) eran código **escrito entero y muerto en el cable de en medio**.
+#    ⚠️ Y no daba ningún error: la página se creaba, sin etiquetas, y nadie lo notaba.
+_BASE = {"title_short": u"Informe general mayo", "reserved_id": "6009", "unit_key": "uct",
+         "document_type": u"Informe", "season_label": u"2025/26",
+         "reference": u"Informe_S-6009_26"}
+_p, _m = PN.propiedades(dict(_BASE, tags_json=u'["informe","mayo","UCT"]'))
+ok(_m == [], u"un caso bueno no debería dar motivos: %r" % (_m,))
+ok(_p.get("Etiquetas") == [u"informe", u"mayo", u"UCT"],
+   u"⛔ las etiquetas de `tags_json` no llegan a la página: %r" % (_p.get("Etiquetas"),))
+# Y la fila real que las trae por comas, también.
+_p, _m = PN.propiedades(dict(_BASE, tags_json=u"informe, general, mayo, UCT"))
+ok(_p.get("Etiquetas") == [u"informe", u"general", u"mayo", u"UCT"],
+   u"⛔ la fila real con las etiquetas por comas se publica sin ninguna: %r" % (_p,))
+# Sin etiquetas, la propiedad no viaja — mandar una lista vacía BORRARÍA las que hubiera.
+ok("Etiquetas" not in PN.propiedades(dict(_BASE))[0], u"sin `tags_json` no debería viajar")
+ok("Etiquetas" not in PN.propiedades(dict(_BASE, tags_json=u"[]"))[0],
+   u"con la lista vacía tampoco")
+# ⚠️ Un `tags_json` ilegible **no impide publicar**: perder las etiquetas es malo, no publicar
+#    el documento es peor. Pero se dice.
+_p, _m = PN.propiedades(dict(_BASE, tags_json=u'["a", "b"'))
+ok(_p is not None, u"⛔ un `tags_json` roto no debería impedir publicar el documento")
+ok(any("JSON" in m for m in _m), u"…pero debería decirse: %r" % (_m,))
+ok("Etiquetas" not in _p, u"y no debería inventarse etiquetas: %r" % (_p.get("Etiquetas"),))
+# `tags` sigue mandando si viene: es por donde entran unas ya casadas.
+ok(PN.propiedades(dict(_BASE, tags=[u"puesta"], tags_json=u'["otra"]'))[0]["Etiquetas"] ==
+   [u"puesta"], u"`tags` explícitas deberían mandar sobre `tags_json`")
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

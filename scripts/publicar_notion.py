@@ -21,14 +21,19 @@ Cómo se prueba
 --------------
 `python scripts/test_publicar_notion.py` — sin red ni credenciales.
 """
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 for _f in (sys.stdout, sys.stderr):
     try:
         _f.reconfigure(encoding="utf-8")
     except Exception:  # pragma: no cover
         pass
+
+import analisis as A
 
 
 # ── La traducción que sólo vivía en la cabeza del modelo ────────────────────────────────────
@@ -150,10 +155,22 @@ def propiedades(expediente):
     }
     # ⛔ El `if e` va ANTES del `str()`: `str(None).strip()` es `"None"`, que es verdadero, y
     #    colaba en Notion una etiqueta fantasma llamada «None». Lo cazó el banco.
-    etiquetas = [str(e).strip() for e in (expediente.get("tags") or []) if e and str(e).strip()]
+    crudas = expediente.get("tags")
+    avisos_etq = []
+    if crudas is None:
+        # ⛔⛔ La columna se llama `tags_json`, no `tags`. Leyendo `tags` —que no existe en
+        #    `SOLICITUDES`— **ninguna página publicada llevaba etiquetas**, y sin dar un solo
+        #    error: la página se creaba, vacía de etiquetas, y nadie lo notaba. Con ella se
+        #    quedaban muertas `analisis.etiquetas` y toda la máquina de no duplicar opciones de
+        #    `notion_api.casar_etiquetas`. `tags` sigue mandando si viene: es por donde entran
+        #    unas ya casadas.
+        crudas, avisos_etq = A.etiquetas(expediente.get("tags_json"))
+    etiquetas = [str(e).strip() for e in (crudas or []) if e and str(e).strip()]
     if etiquetas:
         props["Etiquetas"] = etiquetas
-    return props, []
+    # ⚠️ Los avisos de las etiquetas van **detrás** de devolver las propiedades, no delante:
+    #    perder las etiquetas es malo, **no publicar el documento es peor**. Pero se dice.
+    return props, avisos_etq
 
 
 if __name__ == "__main__":  # pragma: no cover
