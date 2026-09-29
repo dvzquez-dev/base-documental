@@ -97,13 +97,18 @@ ok(AX.revisar({AX.COL_ORIGEN: "a", AX.COL_CUANTOS: ""}) == [],
 
 # ⛔ Y el contador con un tipo MIME dentro: es la fila desplazada, medida en 4 filas reales.
 _MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-_m = AX.revisar({AX.COL_CUANTOS: _MIME})
-ok(any("desplazada" in x for x in _m),
-   u"⛔ un contador que no es un número debería señalar el desplazamiento: %r" % (_m,))
-# ⚠️ Y **enseñando el valor**: «no es un número» a secas no deja ver que lo que hay dentro es
-#    un tipo MIME, que es lo único que explica el desplazamiento sin abrir la hoja.
-ok(any("openxmlformats" in x for x in _m),
-   u"⛔ el aviso no enseña lo que hay en la celda: %r" % (_m,))
+# ⚠️ DE UN CONTADOR QUE NO ES UN NÚMERO **NO SE CANTA AQUÍ**, y el caso que lo exigía se
+#    retira con su motivo: de eso avisa `hoja.desplazadas`, que mira las **diez** columnas
+#    numéricas. Medido sobre las 17 filas reales, tenerlo en los dos sitios daba **8 líneas para
+#    4 problemas**, y un aviso repetido enseña a leer el repaso por encima — que es como se
+#    pierden los que sí son únicos.
+ok(AX.revisar({AX.COL_CUANTOS: _MIME}) == [],
+   u"⛔ repite el aviso que ya da `hoja.desplazadas`: %r" % (AX.revisar({AX.COL_CUANTOS: _MIME}),))
+# ⚠️ Pero un contador ilegible **tampoco se compara**: decir «dice MIME y hay 0 ids» sería
+#    ruido sobre un dato que ya se sabe roto.
+_ROTO = {AX.COL_ORIGEN: "a", AX.COL_CUANTOS: _MIME, AX.COL_FINALES: '["x"]'}
+ok(AX.revisar(_ROTO) == [],
+   u"compara un contador que no es un número: %r" % (AX.revisar(_ROTO),))
 
 # Un JSON roto en los anexos se dice, y no se lee «como se pueda».
 _m = AX.revisar({AX.COL_ORIGEN: '["a", "b"'})

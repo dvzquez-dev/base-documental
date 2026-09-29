@@ -33,6 +33,7 @@ for _f in (sys.stdout, sys.stderr):
 
 import anexos as AX
 import cierre as C
+import sustitucion as SU
 import ejecutor as E
 import hoja as H
 import libro_datos as LD
@@ -113,6 +114,11 @@ def revisar_datos(valores_solicitudes, filas_libro):
         rid = str(r.get("request_id") or "").strip() or u"(sin request_id)"
         for que in AX.revisar(r):
             lineas.append(u"ANEXOS    fila %d %s — %s" % (i + 2, rid, que))
+
+    # Las cadenas de reentrega: una que no se pueda seguir deja el original esperando para
+    # siempre un reenvío que ya llegó.
+    for nf, rid, que in SU.revisar(registros):
+        lineas.append(u"CADENA    fila %d %s — %s" % (nf, rid, que))
 
     for n, ref, que in LD.revisar(filas_libro or []):
         lineas.append(u"LIBRO     fila %d %s — %s" % (n, ref, que))

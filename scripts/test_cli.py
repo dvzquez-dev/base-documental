@@ -222,6 +222,23 @@ _l, _ = CLI.revisar_datos(
 ok(not [l for l in _l if l.startswith("ANEXOS")],
    u"⛔ canta sobre unos anexos en regla que venían por comas: %r" % (_l,))
 
+# ── El repaso mira también las CADENAS de reentrega ───────────────
+# ⚠️ `sustitucion.revisar` se escribió entero y **nadie lo llamaba**: la misma forma que ya
+#    dejó muertas `analisis.etiquetas` y media `notion_api`. Un revisor que no corre no revisa.
+_CAB4 = ["request_id", "reference", "replaces_document", "replacement_reference",
+         "replacement_reason", "closed"]
+_l, _ = CLI.revisar_datos(
+    [_CAB4, ["SOL-5", "Ref_5", "SOL-QUE-NO-ESTA", "Ref_5", "un motivo", "FALSE"]], [])
+ok(any(l.startswith("CADENA") for l in _l), u"⛔ el repaso no mira las cadenas: %r" % (_l,))
+ok(any("no está en la hoja" in l for l in _l), u"no dice qué falla: %r" % (_l,))
+ok(any("SOL-5" in l for l in _l), u"no dice de qué expediente es")
+# ⚠️ Y una cadena en regla no canta.
+_l, _ = CLI.revisar_datos(
+    [_CAB4, ["SOL-A", "Ref_A", "No", "", "", "FALSE"],
+     ["SOL-B", "Ref_A", "SOL-A", "Ref_A", "errata", "FALSE"]], [])
+ok(not [l for l in _l if l.startswith("CADENA")],
+   u"⛔ canta sobre una cadena en regla: %r" % (_l,))
+
 # ── EL WORKFLOW TIENE QUE PASAR TODO LO QUE EL CÓDIGO LEE ──────────
 # ⛔⛔ Medido el 29/09: el código que corre la pasada lee **cuatro** variables de entorno y el
 #    workflow declaraba **tres**. La que faltaba era `DOMINIO_EQUIPO`, o sea que la primera

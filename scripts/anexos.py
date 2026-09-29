@@ -106,8 +106,11 @@ def revisar(fila):
         try:
             cuantos = int(crudo)
         except ValueError:
-            motivos.append(u"`%s` vale %r y no es un número: la fila parece desplazada"
-                           % (COL_CUANTOS, crudo[:60]))
+            # ⚠️ Aquí NO se canta: de eso ya avisa `hoja.desplazadas`, que mira **las diez**
+            #    columnas numéricas y no sólo ésta. Medido sobre las 17 filas reales, tenerlo en
+            #    los dos sitios daba **8 líneas para 4 problemas** — y un aviso repetido enseña a
+            #    leer el repaso por encima, que es como se pierden los que sí son únicos.
+            pass
         else:
             if cuantos != len(f):
                 motivos.append(u"`%s` dice %d y hay %d ids copiados: uno de los dos miente"
