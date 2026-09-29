@@ -243,6 +243,61 @@ def _plano(t):
     return u"".join(c for c in t if unicodedata.category(c) != "Mn")
 
 
+# ⛔⛔ LA CABECERA REAL de la hoja de respuestas, medida el 29/09/2026
+#    (`1lpyO2P4H39WB3T8Kw64PSHU-iiBozP1H1aK0SOuxwJQ`). El formulario **no escribe claves**:
+#    escribe las preguntas tal cual, así que el mapeo va aquí y no se adivina.
+#    ⚠️ Y **la subcarpeta son CINCO columnas**, una por unidad: la respuesta está en la que
+#       corresponda y las otras cuatro vienen vacías. Leer «la» columna de subcarpeta no existe.
+PREGUNTAS = {
+    "Marca temporal": "marca_temporal",
+    "Dirección de correo electrónico": "form_email",
+    "Nombre y apellidos": "author_name_raw",
+    "Título breve y descriptivo": "title_short",
+    "Tipo de documento": "document_type",
+    "Subsistema o unidad": "unit_label",
+    "Adjunta aquí el documento": "source_drive_url",
+    "Adjunta aquí los anexos": "annex_source_urls",
+    "Contexto para la revisión": "context",
+    "Anotaciones propuestas": "submitted_annotations",
+    "¿Sustituye o revisa otro documento?": "sustituye",
+    "Indica la referencia del archivo que deseas sustituir": "referencia_sustituida",
+    "Motivo de la sustitución o revisión": "motivo_sustitucion",
+}
+
+_SUBCARPETA = "Elige la subcarpeta"
+
+
+def respuesta_de(cabecera, fila, n_fila):
+    """Una fila de la hoja de respuestas, traducida a las claves que usa el pipeline.
+
+    ⚠️ `form_row` es **el número de fila de la hoja**, no una columna: es lo que ata la
+    solicitud a su respuesta y lo que impide re-ingerir lo ya ingerido.
+    ⛔ La subcarpeta sale de la **única** de las cinco columnas que venga rellena. Si vienen
+    dos, no se elige una: se deja vacía y que lo mire una persona — archivar en la carpeta
+    equivocada no da ningún error.
+    """
+    cab = [str(c or "").strip() for c in (cabecera or [])]
+    vals = list(fila or []) + [""] * max(0, len(cab) - len(list(fila or [])))
+    out = {"form_row": str(n_fila)}
+    subs = []
+    for c, v in zip(cab, vals):
+        v = str(v or "").strip()
+        if c.startswith(_SUBCARPETA):
+            if v:
+                subs.append(v)
+            continue
+        clave = PREGUNTAS.get(c)
+        if clave:
+            out[clave] = v
+    out["subfolder_label"] = subs[0] if len(subs) == 1 else ""
+    if len(subs) > 1:
+        out["motivo_error"] = (u"la respuesta marca %d subcarpetas (%s): no se elige una a "
+                               u"dedo, archivaría en la que no es sin dar ningún error"
+                               % (len(subs), u", ".join(subs)))
+    out["source_filename"] = out.get("source_filename") or ""
+    return out
+
+
 def sustitucion_de(respuesta, solicitudes):
     """Qué sustituye esta respuesta, o `None` si no sustituye nada.
 

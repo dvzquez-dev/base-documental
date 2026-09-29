@@ -98,6 +98,13 @@ ALCANCES = ["https://www.googleapis.com/auth/drive",
             "https://www.googleapis.com/auth/spreadsheets"]
 PESTANA_RUTAS = "RUTAS"
 
+# ⛔⛔ LA HOJA DE RESPUESTAS DEL FORMULARIO. Medida el 29/09/2026: **es una hoja normal**, así
+#    que la ingesta se lee con **Sheets** y NO hace falta la API de Google Forms — que estuvo en
+#    la lista de «pendiente de Daniel» hasta que se miró. Basta con compartirla en solo lectura
+#    con la cuenta de servicio.
+HOJA_RESPUESTAS = "1lpyO2P4H39WB3T8Kw64PSHU-iiBozP1H1aK0SOuxwJQ"
+PESTANA_RESPUESTAS = "Respuestas de formulario 1"
+
 # Lo que se tacha si asoma en un mensaje de error.
 _SECRETO = re.compile(r"(secret|token|private_key|Bearer\s+\S+|ya29\.\S+|ntn_\S+|secret_\S+)",
                       re.I)
@@ -269,6 +276,43 @@ class Servicios(object):
         r = (self.sheets.spreadsheets().values()
              .get(spreadsheetId=HOJA_SOLICITUDES, range=RANGO_SOLICITUDES).execute())
         return r.get("values", [])
+
+    def leer_respuestas(self):
+        """Los valores crudos de la hoja de respuestas del formulario, cabecera incluida.
+
+        ⚠️ Se lee **hasta la columna S**, que es la última pregunta medida. Un rango corto aquí
+        haría lo mismo que hizo en `SOLICITUDES`: las preguntas de sustitución llegarían vacías
+        y la reentrega se trataría como documento nuevo, **sin dar ningún error**.
+        """
+        rango = u"%s!A1:S" % SA.nombre_pestana(PESTANA_RESPUESTAS)
+        r = (self.sheets.spreadsheets().values()
+             .get(spreadsheetId=os.environ.get("HOJA_RESPUESTAS", "") or HOJA_RESPUESTAS,
+                  range=rango).execute())
+        return r.get("values", [])
+
+    def leer_reservas(self):
+        """Las filas de `RESERVAS_ID`, con cabecera: de ahí sale el siguiente número libre."""
+        r = (self.sheets.spreadsheets().values()
+             .get(spreadsheetId=HOJA_SOLICITUDES, range=u"RESERVAS_ID!A1:H").execute())
+        vals = r.get("values", [])
+        return H.a_registros(vals)[0] if vals else []
+
+    def anadir_solicitudes(self, filas):
+        """Añade filas nuevas al final de `SOLICITUDES`. Devuelve cuántas se escribieron.
+
+        ⛔ `append`, no `update`: escribir por número de fila es como se pisa lo que hay. Y la
+        cabecera manda el orden — se relee cada vez, porque la hoja ha crecido de 78 a 104
+        columnas sin avisar a nadie.
+        """
+        if not filas:
+            return 0
+        cab = (self.leer() or [[]])[0]
+        cuerpo = [[str(f.get(c, "")) for c in cab] for f in filas]
+        self.sheets.spreadsheets().values().append(
+            spreadsheetId=HOJA_SOLICITUDES, range=RANGO_SOLICITUDES,
+            valueInputOption=SA.MODO_POR_DEFECTO, insertDataOption="INSERT_ROWS",
+            body={"values": cuerpo}).execute()
+        return len(cuerpo)
 
     def leer_libro(self):
         """Las filas del Libro de Datos, **sin** la cabecera (es lo que espera `libro_datos`)."""

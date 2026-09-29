@@ -213,5 +213,53 @@ for _no in (u"No", u"NO", u" no ", u""):
     ok(I.sustitucion_de({"sustituye": _no, "referencia_sustituida": "Acta_S-6301_27"},
                         YA) is None, "toma %r por un si" % _no)
 
+# ---- LA HOJA DE RESPUESTAS, TRADUCIDA ------------------------------------
+# La cabecera es LA REAL, medida el 29/09/2026: el formulario no escribe claves, escribe las
+# preguntas tal cual. Y la subcarpeta son CINCO columnas, una por unidad -- la respuesta esta
+# en la que toque y las otras cuatro vienen vacias.
+CAB_REAL = [
+    u"Marca temporal", u"Dirección de correo electrónico", u"Nombre y apellidos",
+    u"Título breve y descriptivo", u"Tipo de documento", u"Subsistema o unidad",
+    u"Elige la subcarpeta de GNC en la que deseas incluir el archivo:",
+    u"Elige la subcarpeta de Aviónica en la que deseas incluir el archivo:",
+    u"Elige la subcarpeta de Aeroestructuras en la que deseas incluir el archivo:",
+    u"Elige la subcarpeta de Propulsión en la que deseas incluir el archivo:",
+    u"Elige la subcarpeta de la UCT en la que deseas incluir el archivo:",
+    u"Adjunta aquí el documento", u"Adjunta aquí los anexos",
+    u"Contexto para la revisión", u"Anotaciones propuestas",
+    u"¿Sustituye o revisa otro documento?",
+    u"Indica la referencia del archivo que deseas sustituir",
+    u"Declara si afirmas lo siguiente:", u"Motivo de la sustitución o revisión"]
+# La fila 3 REAL, tal cual.
+FILA_REAL = [u"2/07/2026 14:58:08", u"daniel.vazquez.pineiro@uvigoaerotech.com",
+             u"Daniel Vázquez Piñeiro", u"Acta Reunión 27/06/2026", u"Acta",
+             u"Unidad de Coordinación Técnica (6)", u"", u"", u"", u"", u"Actas - (3/4)",
+             u"https://drive.google.com/open?id=1d8Kj9WFfhjZmJRrTRan_Lf8VKmSWKUF3",
+             u"", u"", u"", u"No", u"", u"Confirmo", u""]
+
+r = I.respuesta_de(CAB_REAL, FILA_REAL, 3)
+ok(r.get("form_row") == "3", "`form_row` es el NUMERO DE FILA, no una columna: %r" % (r,))
+ok(r.get("title_short") == u"Acta Reunión 27/06/2026", "no traduce el titulo")
+ok(r.get("document_type") == u"Acta", "no traduce el tipo")
+ok(r.get("unit_label") == u"Unidad de Coordinación Técnica (6)", "no traduce la unidad")
+# La subcarpeta sale de la UNICA de las cinco que viene rellena.
+ok(r.get("subfolder_label") == u"Actas - (3/4)",
+   "no coge la subcarpeta de la columna que toca: %r" % (r.get("subfolder_label"),))
+ok(r.get("source_drive_url", "").endswith("1d8Kj9WFfhjZmJRrTRan_Lf8VKmSWKUF3"), "no coge el enlace")
+ok(r.get("sustituye") == "No", "no lee la pregunta de sustitucion")
+ok(not r.get("motivo_error"), "una fila buena no deberia dar error: %r" % (r.get("motivo_error"),))
+
+# Con DOS subcarpetas marcadas no se elige a dedo: archivaria donde no es SIN DAR ERROR.
+_dos = list(FILA_REAL); _dos[6] = u"General - 0"
+r2 = I.respuesta_de(CAB_REAL, _dos, 4)
+ok(r2.get("subfolder_label") == "", "elige una de dos subcarpetas a dedo: %r" % (r2,))
+ok(r2.get("motivo_error") and "2" in r2["motivo_error"], "no canta las dos: %r" % (r2,))
+
+# Una fila mas corta que la cabecera no revienta (Sheets recorta las celdas vacias del final).
+r3 = I.respuesta_de(CAB_REAL, [u"2/07/2026 14:58:08", u"a@b.c"], 5)
+ok(r3.get("form_email") == "a@b.c" and r3.get("title_short") == "",
+   "una fila corta deberia rellenarse con vacios: %r" % (r3,))
+ok(I.respuesta_de([], [], 2).get("form_row") == "2", "sin cabecera no revienta")
+
 print("\n%s  (%d fallo(s))" % ("TODO OK" if not fallos else "HAY FALLOS", len(fallos)))
 sys.exit(1 if fallos else 0)

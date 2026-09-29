@@ -82,14 +82,16 @@ ok("APLICADA" in txt, u"el informe no dice que se aplicó")
 
 # ── 2. Los argumentos ──────────────────────────────────────────────────────────────────────
 op, m = CLI.parsear([])
-ok(op == {"aplicar": False, "limite": None, "revisar": False}, u"los valores por defecto: %r" % (op,))
+ok(op == {"aplicar": False, "limite": None, "revisar": False, "ingerir": False}, u"los valores por defecto: %r" % (op,))
 ok(m == [], u"sin argumentos no debería haber motivos")
 ok(CLI.parsear(["--aplicar"])[0]["aplicar"] is True, u"no reconoce --aplicar")
 ok(CLI.parsear(["--limite", "3"])[0]["limite"] == 3, u"no reconoce --limite")
 ok(CLI.parsear(["--revisar"])[0]["revisar"] is True, u"no reconoce --revisar")
 ok(CLI.parsear(["--aplicar", "--limite", "5"])[0] == {"aplicar": True, "limite": 5,
-                                                      "revisar": False},
+                                                      "revisar": False, "ingerir": False},
    u"no combina --aplicar con --limite")
+ok(CLI.parsear(["--ingerir"])[0]["ingerir"] is True, u"no reconoce --ingerir")
+ok(CLI.parsear([])[0]["ingerir"] is False, u"ingerir no puede ser el camino por defecto")
 
 # ⛔ Un argumento que no se entiende PARA la pasada. Ignorarlo es como un `--aplciar` mal escrito
 #    acaba en una pasada seca que alguien da por aplicada.
@@ -335,6 +337,123 @@ _faltan = sorted(v for v in _PEDIDAS if v not in _DECLARADAS)
 ok(_faltan == [],
    u"⛔ el workflow no pasa %r: la pasada se pararía con los secretos puestos y sin que nada "
    u"en el repo lo dijera" % (_faltan,))
+
+# ── LA INGESTA, DE PUNTA A PUNTA ───────────────────────────
+_CABR = [u"Marca temporal", u"Dirección de correo electrónico", u"Nombre y apellidos",
+         u"Título breve y descriptivo", u"Tipo de documento", u"Subsistema o unidad",
+         u"Elige la subcarpeta de la UCT en la que deseas incluir el archivo:",
+         u"Adjunta aquí el documento", u"¿Sustituye o revisa otro documento?",
+         u"Indica la referencia del archivo que deseas sustituir",
+         u"Motivo de la sustitución o revisión"]
+_RUTAS_IN = [{"unit_key": "uct", "subfolder_key": "actas", "range_start": "6301",
+              "range_end": "6499", "drive_folder_id": "F-actas", "active": "TRUE"}]
+_SOLIS = [["request_id", "form_row", "reference", "reserved_id"]]
+
+def _fila(n, tit, sus="No", ref=""):
+    return [u"2/10/2026 10:00:00", u"a@b.c", u"Quien", tit, u"Acta",
+            u"Unidad de Coordinación Técnica (6)", u"Actas - (3/4)",
+            u"https://drive.google.com/open?id=1AAA", sus, ref, u""]
+
+_f, _av = CLI.ingerir([_CABR, _fila(2, u"Acta de octubre")], _SOLIS, _RUTAS_IN, [])
+ok(len(_f) == 1 and _av == [], u"no ingiere una respuesta buena: %r / %r" % (_f, _av))
+ok(_f and _f[0]["reference"] == u"Acta_S-6301_27",
+   u"⛔ la referencia no es la que toca — 2/10/2026 es temporada 26/27, sufijo 27: %r"
+   % (_f[0].get("reference") if _f else None,))
+ok(_f and _f[0]["form_row"] == "2", u"no ata la solicitud a su fila de respuestas")
+ok(_f and _f[0]["unit_key"] == "uct" and _f[0]["subfolder_key"] == "actas",
+   u"no resuelve la ruta por los números de las etiquetas: %r" % (_f[0],))
+
+# ⚠️ Lo ya ingerido NO se repite: es lo que impide duplicar un expediente cada pasada.
+_ya = [["request_id", "form_row", "reference", "reserved_id"], ["SOL-X", "2", "Acta_S-6301_27", "6301"]]
+ok(CLI.ingerir([_CABR, _fila(2, u"Acta de octubre")], _ya, _RUTAS_IN, [])[0] == [],
+   u"⛔ re-ingiere una respuesta que ya está en SOLICITUDES")
+
+# ⛔ Dos respuestas seguidas de la MISMA ruta no pueden llevarse el mismo número.
+_f2, _ = CLI.ingerir([_CABR, _fila(2, u"Acta A"), _fila(3, u"Acta B")], _SOLIS, _RUTAS_IN, [])
+ok(len(_f2) == 2, u"no ingiere las dos: %r" % (_f2,))
+ok(_f2 and _f2[0]["reserved_id"] != _f2[1]["reserved_id"],
+   u"⛔ dos respuestas de la misma ruta se llevan EL MISMO número: %r"
+   % ([x.get("reserved_id") for x in _f2],))
+
+# ✅ Una SUSTITUCIÓN reusa el número del original y no reserva otro.
+_conviejo = [["request_id", "form_row", "reference", "reserved_id"],
+             ["SOL-VIEJA", "9", "Acta_S-6301_27", "6301"]]
+_f3, _av3 = CLI.ingerir([_CABR, _fila(2, u"Acta corregida", u"Sí", u"Acta_S-6301_27")],
+                        _conviejo, _RUTAS_IN, [])
+ok(len(_f3) == 1 and _f3[0]["reserved_id"] == "6301",
+   u"⛔ una reentrega se lleva un número nuevo en vez de reusar el del original: %r" % (_f3,))
+ok(_f3 and _f3[0]["replaces_document"] == "SOL-VIEJA", u"no anota a quién sustituye")
+
+# ⛔ Y lo que no se puede ingerir sale en avisos SIN parar a los demás.
+_f4, _av4 = CLI.ingerir(
+    [_CABR, _fila(2, u"Mala", u"Sí", u"Acta_S-9999_27"), _fila(3, u"Buena")],
+    _SOLIS, _RUTAS_IN, [])
+ok(len(_f4) == 1 and len(_av4) == 1,
+   u"⛔ una respuesta rota deja sin entrar a las de detrás: %r / %r" % (_f4, _av4))
+ok(_av4 and "fila 2" in _av4[0], u"el aviso no dice qué fila: %r" % (_av4,))
+
+# ⛔ SIN RUTA no se ingiere: archivaría donde no es y sin dar error. (La mutación que quita
+#    esta guarda salía ciega: con ruta `None`, `siguiente_id` también devuelve None y la fila
+#    caía por el otro camino, así que había que exigir QUÉ aviso da.)
+_f5, _av5 = CLI.ingerir([_CABR, _fila(2, u"Sin ruta")], _SOLIS, [], [])
+ok(_f5 == [] and len(_av5) == 1, u"sin ruta no debería entrar: %r" % (_f5,))
+ok("no hay una sola ruta activa" in _av5[0],
+   u"⛔ el aviso confunde «sin ruta» con «rango agotado»: mandan a arreglar cosas distintas. "
+   u"Dice: %r" % (_av5,))
+
+# ⛔ Y una sustitución que no se puede atar NO entra, y su aviso lo dice por su nombre.
+_f6, _av6 = CLI.ingerir(
+    [_CABR, _fila(2, u"Reentrega huérfana", u"Sí", u"Acta_S-9999_27")], _SOLIS, _RUTAS_IN, [])
+ok(_f6 == [], u"⛔ una reentrega que apunta a un original inexistente se ingiere igual")
+ok(_av6 and "no hay ningún expediente con esa referencia" in _av6[0],
+   u"el aviso no dice que el original no existe: %r" % (_av6,))
+
+ok(CLI.ingerir([], _SOLIS, _RUTAS_IN, []) == ([], []), u"sin respuestas no hay nada que ingerir")
+ok(CLI.ingerir([_CABR], _SOLIS, _RUTAS_IN, []) == ([], []), u"solo cabecera tampoco")
+
+# ── `--ingerir` corre de verdad, y es SECO salvo --aplicar ───────────
+class _SrvIn(object):
+    def __init__(self):
+        self.anadidas = None
+
+    def leer(self):
+        return [["request_id", "form_row", "reference", "reserved_id"]]
+
+    def leer_respuestas(self):
+        return [_CABR, _fila(2, u"Acta de octubre")]
+
+    def leer_rutas(self):
+        return _RUTAS_IN
+
+    def leer_reservas(self):
+        return []
+
+    def anadir_solicitudes(self, filas):
+        self.anadidas = filas
+        return len(filas)
+
+
+_s = _SrvIn()
+_txt, _cod = CLI.correr(["--ingerir"], _s)
+ok("INGESTA" in _txt and "Acta_S-6301_27" in _txt,
+   u"la ingesta seca no enseña lo que añadiría: %r" % (_txt,))
+ok(_s.anadidas is None, u"⛔ la ingesta SECA ha escrito en SOLICITUDES")
+ok("seco" in _txt, u"no dice que fue en seco: %r" % (_txt,))
+
+_s2 = _SrvIn()
+_txt2, _cod2 = CLI.correr(["--ingerir", "--aplicar"], _s2)
+ok(_s2.anadidas and len(_s2.anadidas) == 1,
+   u"⛔ con --aplicar no añade nada: %r" % (_s2.anadidas,))
+ok("1 fila" in _txt2, u"no dice cuántas añadió: %r" % (_txt2,))
+
+# ⚠️ Y si el adaptador no sabe leer respuestas, se dice — no se hace como que no había nada.
+class _Pelado(object):
+    def leer(self):
+        return [["request_id"]]
+
+
+_t3, _c3 = CLI.correr(["--ingerir"], _Pelado())
+ok(_c3 == 2 and "leer_respuestas" in _t3, u"un adaptador sin ingesta debería decirlo: %r" % (_t3,))
 
 print("%d comprobaciones" % hechas[0])
 if fallos:

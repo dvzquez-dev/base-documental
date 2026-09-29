@@ -1250,6 +1250,60 @@ ok(_etq == [u"python", u"CFD"],
 ok(_intentos_red == [], u"⛔ el banco ha intentado LEER de Notion %d vez/veces: %r"
    % (len(_intentos_red), _intentos_red[:3]))
 
+# ── LA INGESTA: leer respuestas y AÑADIR, nunca pisar ───────────────
+# ⛔⛔ El paso 1 no existía en ejecución: `ingesta_forms` era lógica pura y **no la llamaba
+#    nadie**. Y la hoja de respuestas es **una hoja normal**, así que se lee con Sheets — la
+#    API de Google Forms, que llevaba semanas en la lista de «pendiente de Daniel», **no hace
+#    falta**. Bastaba con mirarlo.
+_sh = Sheets({"get": {"values": [[u"Marca temporal", u"Tipo de documento"],
+                                 [u"2/07/2026 14:58:08", u"Acta"]]}})
+_srv = S.Servicios(notion_get=_esq, sheets=_sh)
+ok(_srv.leer_respuestas() == [[u"Marca temporal", u"Tipo de documento"],
+                              [u"2/07/2026 14:58:08", u"Acta"]],
+   u"no devuelve los valores crudos de la hoja de respuestas")
+_pedido = _sh.diario[0][1]
+ok(_pedido["spreadsheetId"] == S.HOJA_RESPUESTAS,
+   u"⛔ no pide la hoja de respuestas del formulario: %r" % (_pedido,))
+ok("Respuestas de formulario 1" in _pedido["range"] and _pedido["range"].endswith(":S"),
+   u"⚠️ el rango no llega a la última pregunta: las de sustitución llegarían vacías y la "
+   u"reentrega se trataría como documento nuevo. Pide %r" % (_pedido["range"],))
+# ⚠️ El nombre lleva espacios, así que va entrecomillado o Sheets no lo entiende.
+ok(_pedido["range"].startswith("'"), u"el nombre con espacios va entrecomillado: %r" % (_pedido,))
+
+# ── AÑADIR, no pisar ──────────────────────────────────────
+class _Append(Sheets):
+    def __init__(self, resp):
+        Sheets.__init__(self, resp)
+
+    def spreadsheets(self):
+        s_ = Sheets.spreadsheets(self)
+        _v = s_.values()
+        def _app(**kw):
+            self.diario.append(("append", kw))
+            return _Ejec({})
+        _v.append = _app
+        return s_
+
+
+_sh2 = _Append({"get": {"values": [["request_id", "title_short", "closed"]]}})
+_n = S.Servicios(notion_get=_esq, sheets=_sh2).anadir_solicitudes(
+    [{"request_id": "SOL-1", "title_short": u"Un acta"}])
+ok(_n == 1, u"no dice cuántas filas añadió: %r" % (_n,))
+_ap = [k for a_, k in _sh2.diario if a_ == "append"]
+ok(_ap, u"⛔ no usa `append`: escribir por número de fila pisa lo que hay")
+ok(_ap and _ap[0]["body"]["values"] == [["SOL-1", u"Un acta", ""]],
+   u"⛔ la fila no sale en el ORDEN DE LA CABECERA: %r" % (_ap[0]["body"] if _ap else None,))
+ok(_ap and _ap[0].get("insertDataOption") == "INSERT_ROWS",
+   u"sin `INSERT_ROWS` puede sobrescribir lo que haya debajo")
+_vacio = _Append({"get": {"values": [["request_id"]]}})
+ok(S.Servicios(notion_get=_esq, sheets=_vacio).anadir_solicitudes([]) == 0,
+   u"sin filas no se escribe nada")
+# ⛔ Y NO SE LLAMA a Sheets: sin este caso la guarda salía ciega — un `append` con la lista
+#    vacía también devuelve 0, así que contar el resultado no distingue «no escribió» de
+#    «escribió nada», y una escritura de más contra `SOLICITUDES` no tiene deshacer.
+ok([a_ for a_, _ in _vacio.diario if a_ == "append"] == [],
+   u"⛔ llama a `append` con la lista vacía: %r" % (_vacio.diario,))
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

@@ -54,7 +54,7 @@ def parsear(argv):
     `--aplciar` mal escrito acaba siendo una pasada seca que alguien da por aplicada, o al revés.
     """
     motivos = []
-    op = {"aplicar": False, "limite": None, "revisar": False}
+    op = {"aplicar": False, "limite": None, "revisar": False, "ingerir": False}
     i = 0
     args = list(argv or [])
     while i < len(args):
@@ -63,6 +63,8 @@ def parsear(argv):
             op["aplicar"] = True
         elif a == "--revisar":
             op["revisar"] = True
+        elif a == "--ingerir":
+            op["ingerir"] = True
         elif a == "--limite":
             if i + 1 >= len(args):
                 motivos.append(u"`--limite` se ha quedado sin número")
@@ -89,6 +91,81 @@ def parsear(argv):
         motivos.append(u"`--revisar` sólo mira; con `--aplicar` no significa nada. Elige uno")
 
     return (None, motivos) if motivos else (op, [])
+
+
+def ingerir(respuestas, solicitudes_valores, rutas, reservas, hoy=None):
+    """Las filas nuevas que hay que añadir a `SOLICITUDES`, y lo que no se ha podido ingerir.
+
+    ⛔⛔ EL PASO 1, QUE NO CORRÍA. `ingesta_forms` era lógica pura y no la llamaba nadie: una
+    respuesta enviada a las 23:48 seguía sin ingerir a la mañana siguiente, y el caso peor
+    registrado esperó **doce horas**.
+
+    Devuelve `(filas, avisos)`. **Nunca lanza**: una respuesta que no se puede ingerir sale en
+    `avisos` y las demás siguen — que el número 3 reviente no puede dejar sin entrar a los 40
+    de detrás.
+    """
+    import ingesta_forms as IF                                           # noqa: PLC0415
+    filas, avisos = [], []
+    vals = list(respuestas or [])
+    if len(vals) < 2:
+        return [], []
+    cab, cuerpo = vals[0], vals[1:]
+
+    registros = H.a_registros(solicitudes_valores or [[]])[0]
+    ya = set(str(r.get("form_row", "")).strip() for r in registros)
+    reservas = list(reservas or [])
+
+    for i, fila in enumerate(cuerpo):
+        n = i + 2                       # +1 por la cabecera, +1 por contar desde 1
+        if str(n) in ya:
+            continue
+        r = IF.respuesta_de(cab, fila, n)
+        rid = r.get("title_short") or u"(sin título)"
+        if r.get("motivo_error"):
+            avisos.append(u"fila %d %s — %s" % (n, rid, r["motivo_error"]))
+            continue
+        fecha = IF.fecha_form(r.get("marca_temporal"))
+        if not fecha:
+            avisos.append(u"fila %d %s — la marca temporal %r no se entiende: sin fecha no se "
+                          u"sabe de qué temporada es" % (n, rid, r.get("marca_temporal")))
+            continue
+        season_label, sufijo = IF.temporada_de(fecha.date() if hasattr(fecha, "date") else fecha)
+
+        # ⛔ La SUSTITUCIÓN manda sobre el número nuevo: una reentrega reusa el de la
+        #    referencia que sustituye, o no entra. Darle número nuevo deja dos expedientes del
+        #    mismo documento y nadie sabe cuál manda.
+        sus = IF.sustitucion_de(r, registros)
+        if sus and sus.get("motivo_error"):
+            avisos.append(u"fila %d %s — %s" % (n, rid, sus["motivo_error"]))
+            continue
+
+        ruta = IF.ruta_de(r.get("unit_label"), r.get("subfolder_label"), rutas or [])
+        if ruta is None:
+            avisos.append(u"fila %d %s — no hay una sola ruta activa para %r + %r: sin ella el "
+                          u"documento se archivaría donde no es, sin dar error"
+                          % (n, rid, r.get("unit_label"), r.get("subfolder_label")))
+            continue
+
+        if sus:
+            num = sus.get("reserved_id")
+        else:
+            num = IF.siguiente_id(ruta, reservas, sufijo)
+        if not num:
+            avisos.append(u"fila %d %s — el rango de esa ruta está agotado para la temporada "
+                          u"%s: se amplía el rango, no se reutiliza un número" % (n, rid, sufijo))
+            continue
+
+        f = IF.fila_solicitud(r, ruta, num, sufijo, season_label, fecha)
+        if sus:
+            f["replaces_document"] = sus.get("replaces_document", "")
+            f["replacement_reference"] = sus.get("replacement_reference", "")
+            f["replacement_reason"] = sus.get("replacement_reason", "")
+        # ⚠️ El número se apunta en las reservas de esta misma pasada: si no, dos respuestas
+        #    seguidas de la misma ruta se llevan **el mismo** número.
+        reservas.append({"reserved_id": str(num), "season_suffix": sufijo})
+        filas.append(f)
+
+    return filas, avisos
 
 
 def revisar_datos(valores_solicitudes, filas_libro):
@@ -165,6 +242,40 @@ def correr(argv, servicios, ahora=None):
         valores = leer()
     except Exception as e:
         return u"al leer la hoja: %s: %s" % (type(e).__name__, e), 2
+
+    # ⛔⛔ EL PASO 1. Va ANTES del reparto a propósito: lo que se acaba de ingerir entra en la
+    #    misma pasada, y si no, una respuesta nueva espera a la vuelta siguiente — que es
+    #    exactamente lo que hacía que una enviada a las 23:48 siguiera ahí por la mañana.
+    #    ⚠️ Y es **seco** salvo `--aplicar`, como todo lo demás: añadir filas a `SOLICITUDES`
+    #       no tiene deshacer.
+    if op["ingerir"]:
+        _lr = getattr(servicios, "leer_respuestas", None)
+        _lru = getattr(servicios, "leer_rutas", None)
+        _lre = getattr(servicios, "leer_reservas", None)
+        if not (callable(_lr) and callable(_lru)):
+            return u"`servicios.leer_respuestas` o `leer_rutas` no existen: no hay ingesta", 2
+        try:
+            _resp = _lr()
+            _rut = _lru()
+            _res = _lre() if callable(_lre) else []
+        except Exception as e:
+            return u"al leer para la ingesta: %s: %s" % (type(e).__name__, e), 2
+        _nuevas, _avisos = ingerir(_resp, valores, _rut, _res)
+        _lin = [u"INGESTA: %d respuesta(s) nueva(s)" % len(_nuevas)]
+        _lin += [u"  + %s  %s" % (f.get("reference"), f.get("title_short")) for f in _nuevas]
+        _lin += [u"  !! %s" % x for x in _avisos]
+        if not op["aplicar"]:
+            _lin.append(u"(seco: nada escrito. Con --aplicar se añaden a SOLICITUDES)")
+            return u"\n".join(_lin), (1 if _avisos else 0)
+        _add = getattr(servicios, "anadir_solicitudes", None)
+        if not callable(_add):
+            return u"`servicios.anadir_solicitudes` no existe: no se escribe nada", 2
+        try:
+            _n = _add(_nuevas)
+        except Exception as e:
+            return u"al añadir a SOLICITUDES: %s: %s" % (type(e).__name__, e), 2
+        _lin.append(u"%d fila(s) añadida(s) a SOLICITUDES" % _n)
+        return u"\n".join(_lin), (1 if _avisos else 0)
 
     if op["revisar"]:
         filas_libro = []

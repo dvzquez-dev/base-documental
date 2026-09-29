@@ -86,6 +86,9 @@ jobs:
           # Y la base, también por si algún día es otra. Vacío = la de «Documentos
           # internos» que lleva escrita `servicios.NOTION_BASE_DOCS`.
           NOTION_BASE_DOCS: ${{ vars.NOTION_BASE_DOCS }}
+          # La hoja de RESPUESTAS del formulario. Vacía = la que lleva escrita
+          # `servicios.HOJA_RESPUESTAS`. Se lee con Sheets: la API de Forms NO hace falta.
+          HOJA_RESPUESTAS: ${{ vars.HOJA_RESPUESTAS }}
           # ⛔ `DOMINIO_EQUIPO` no es un secreto, pero SIN ELLA la publicación se para en
           #    seco: `permiso_dominio` se niega a compartir con "", que no comparte con
           #    nadie. Faltaba, y el fallo habría sido «falta la variable» con todos los
