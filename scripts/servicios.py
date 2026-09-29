@@ -150,6 +150,21 @@ def http_notion(url, cuerpo, token=None):
         return json.loads(r.read().decode("utf-8"))
 
 
+def http_notion_patch(url, cuerpo, token=None):
+    """PATCH a Notion. Aparte del POST **porque no es lo mismo**: «append block children» es un
+    PATCH, y mandarlo por POST contesta **405** — los anexos se quedarían fuera de la página.
+    """
+    import urllib.request                                                # noqa: PLC0415
+    datos = json.dumps(cuerpo).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=datos, method="PATCH",
+        headers={"Authorization": "Bearer %s" % (token or _token_notion()),
+                 "Content-Type": "application/json",
+                 "Notion-Version": NOTION_VERSION})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 def http_subir(url, datos, nombre, token=None):
     """Manda el fichero a la URL que dio Notion, en `multipart/form-data`.
 
@@ -199,7 +214,7 @@ class Servicios(object):
     """
 
     def __init__(self, sheets=None, notion=None, drive=None, subir=None, notion_get=None,
-                 medio=None):
+                 medio=None, notion_patch=None):
         self._sheets = sheets
         self._notion = notion or http_notion
         self._drive = drive
@@ -209,6 +224,7 @@ class Servicios(object):
         # ⚠️ Inyectable como los demás: si no, el banco acabaría pidiendo `NOTION_TOKEN` y
         #    hablando con Notion de verdad — justo lo que un banco no puede hacer.
         self._notion_get = notion_get or http_notion_get
+        self._notion_patch = notion_patch or http_notion_patch
         # ⚠️ El envoltorio de subida de Drive, inyectable por lo mismo: `MediaInMemoryUpload`
         #    vive en `googleapiclient`, que el banco NO tiene instalado (y no debe: el paso de
         #    bancos del workflow corre ANTES del `pip install`).
@@ -384,6 +400,13 @@ class Servicios(object):
         #    documento queda archivado y cerrado sin los ficheros que lo acompañan.
         if _carpeta:
             extra.update(self.copiar_anexos(fila, _carpeta))
+        # ⛔ Y se ENLAZAN en la página. Copiarlos a Drive no es enlazarlos: un anexo archivado
+        #    que la página no menciona no existe para quien lee el documento en Notion.
+        #    ⚠️ Se enlazan **todos** los que consten, no sólo los copiados en esta pasada: si la
+        #       anterior copió y se cortó antes de enlazar, esos se habrían quedado fuera.
+        _anexos, _ = AX.finales(dict(fila, **extra))
+        if _anexos:
+            self.enlazar_anexos(pid, _anexos)
 
         extra["notion_page_id"] = pid
         extra["notion_page_url"] = str(r.get("url") or "")
@@ -449,6 +472,34 @@ class Servicios(object):
             if str((f.get("file_upload") or {}).get("id") or "") == str(subida_id):
                 return True
         return False
+
+    def enlazar_anexos(self, pagina_id, ids_copiados):
+        """Engancha los anexos a la página como marcadores y **relee** que hayan quedado.
+
+        ⛔ Copiarlos a Drive no es enlazarlos: un anexo archivado que la página no menciona **no
+        existe** para quien lee el documento en Notion, que es donde el equipo lo lee.
+        ⚠️ Un solo parche con todos: siete peticiones para siete anexos es siete veces la
+        probabilidad de quedarse a medias, y a medias no hay forma de saber por dónde iba.
+        """
+        pid = str(pagina_id or "").strip()
+        bloques = AX.bloques(ids_copiados)
+        if not pid or not bloques:
+            return False
+        self._notion_patch(NOTION_HIJOS % pid, {"children": bloques})
+        # ⛔ Y se RELEE: que el parche conteste bien no prueba que los bloques hayan quedado —
+        #    la misma distinción que ya tumbó «subir es embeber» y «mover es verificar».
+        r = self._notion_get(NOTION_HIJOS % pid) or {}
+        puestas = set()
+        for b in (r.get("results") or []):
+            u = str((b.get("bookmark") or {}).get("url") or "").strip()
+            if u:
+                puestas.add(u)
+        faltan = [b["bookmark"]["url"] for b in bloques
+                  if b["bookmark"]["url"] not in puestas]
+        if faltan:
+            raise SystemExit("la página %s no muestra %d anexo(s) tras enlazarlos: quedan "
+                             "archivados en Drive y sin mencionar donde se leen" % (pid, len(faltan)))
+        return True
 
     def mover_a_carpeta(self, fila, carpeta_id):
         """Mueve el fichero de origen a la carpeta del expediente. Devuelve su id.

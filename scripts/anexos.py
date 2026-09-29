@@ -118,6 +118,27 @@ def revisar(fila):
     return motivos
 
 
+URL_FICHERO = "https://drive.google.com/file/d/%s/view"
+
+
+def bloques(ids_copiados):
+    """Los bloques con que los anexos se enlazan en la página de Notion. Lista, puede ir vacía.
+
+    ⛔ Copiarlos a Drive **no es enlazarlos**: un anexo archivado que la página no menciona **no
+    existe** para quien lee el documento en Notion, que es donde el equipo lo lee.
+    ⚠️ Van como **marcador** y no como fichero adjunto: el fichero ya está en Drive y subirlo
+    otra vez a Notion dejaría dos copias — y la de Notion no se actualizaría nunca.
+    """
+    fuera = []
+    for i in (ids_copiados or []):
+        t = str(i if i is not None else "").strip()
+        if not t:
+            continue
+        fuera.append({"object": "block", "type": "bookmark",
+                      "bookmark": {"url": URL_FICHERO % t}})
+    return fuera
+
+
 def cambios(ids_copiados):
     """Lo que hay que escribir en la hoja tras copiar. `{}` si no se copió nada.
 

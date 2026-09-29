@@ -44,6 +44,16 @@ def _sin_red(url, token=None):
 S.http_notion_get = _sin_red
 
 
+def _sin_red_patch(url, cuerpo, token=None):
+    """El mismo tripwire para el PATCH: una puerta nueva necesita su propio doble, o el banco
+    se va a la red por el hueco que acaba de abrirse."""
+    _intentos_red.append(url)
+    return {"results": []}
+
+
+S.http_notion_patch = _sin_red_patch
+
+
 def _esq(url, token=None):
     """El esquema de «Etiquetas», doblado: vacío."""
     return {}
@@ -774,14 +784,86 @@ ok(_paro, u"⛔ Drive sin devolver el id de una copia debería pararse y decirlo
 
 # ── Y `publicar` los copia ────────────────────────────────
 # ⚠️ Probar el método suelto deja ciega la línea que lo llama: es la TERCERA vez hoy.
+# ⚠️ Los dobles saben enseñar los marcadores ya puestos: si no, `publicar` se plantaría al
+#    releer la página y el caso saldría rojo por un doble pobre, no por el código.
+_ANEXOS_PUESTOS = {"results": [
+    {"type": "bookmark", "bookmark": {"url": "https://drive.google.com/file/d/C-1/view"}},
+    {"type": "bookmark", "bookmark": {"url": "https://drive.google.com/file/d/C-2/view"}}]}
 _dr = Drive()
 _d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
-                 notion_get=_esq, drive=_dr).publicar(
+                 notion_get=lambda u, token=None: _ANEXOS_PUESTOS,
+                 notion_patch=lambda u, c, token=None: {}, drive=_dr).publicar(
                      dict(FILA, annex_drive_file_ids_json="a1, a2"))
 ok(_d.get("annex_copied_count") == 2,
    u"⛔ `publicar` no copia los anexos del expediente: %r" % (_d,))
 ok([k["body"]["parents"] for a_, k in _dr.diario if a_ == "copy"] == [["F-ya-existe"]] * 2,
    u"los anexos no van a la carpeta del expediente: %r" % (_dr.diario,))
+
+# ⚠️ Y `publicar` los enlaza: probar el método suelto deja ciega la línea que lo llama.
+_par = []
+_dr = Drive()
+S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
+            notion_get=lambda u, token=None: {"results": [
+                {"type": "bookmark",
+                 "bookmark": {"url": "https://drive.google.com/file/d/C-1/view"}},
+                {"type": "bookmark",
+                 "bookmark": {"url": "https://drive.google.com/file/d/C-2/view"}}]},
+            notion_patch=lambda u, c, token=None: _par.append(c) or {},
+            drive=_dr).publicar(dict(FILA, annex_drive_file_ids_json="a1, a2"))
+ok(len(_par) == 1 and len(_par[0]["children"]) == 2,
+   u"⛔ `publicar` copia los anexos a Drive y NO los enlaza en la página: %r" % (_par,))
+
+# ── LOS ANEXOS SE ENLAZAN EN LA PÁGINA, Y SE RELEE ──────────────
+# ⛔ Copiarlos a Drive no es enlazarlos: un anexo archivado que la página no menciona **no
+#    existe** para quien lee el documento en Notion, que es donde el equipo lo lee.
+# ⚠️ Y se añaden con **PATCH**, no con POST: `append block children` de Notion es un PATCH, y
+#    mandarlo por POST contesta 405 — o sea que los siete anexos se quedarían fuera.
+_parches = []
+
+
+def _patch_ok(url, cuerpo, token=None):
+    _parches.append((url, cuerpo))
+    return {"results": [{"type": "bookmark", "bookmark": {"url": u}}
+                        for u in [b["bookmark"]["url"] for b in cuerpo["children"]]]}
+
+
+def _hijos_con_anexos(url, token=None):
+    return {"results": [{"type": "bookmark",
+                         "bookmark": {"url": "https://drive.google.com/file/d/C-1/view"}},
+                        {"type": "bookmark",
+                         "bookmark": {"url": "https://drive.google.com/file/d/C-2/view"}}]}
+
+
+_srv = S.Servicios(notion_get=_hijos_con_anexos, notion_patch=_patch_ok)
+ok(_srv.enlazar_anexos("p-1", ["C-1", "C-2"]) is True, u"no enlaza los anexos")
+ok(len(_parches) == 1, u"debería mandarse UN parche con los dos, no uno por anexo: %r"
+   % (len(_parches),))
+ok("p-1" in _parches[0][0] and "children" in _parches[0][0],
+   u"no pide los hijos de la página: %r" % (_parches[0][0],))
+ok(len(_parches[0][1]["children"]) == 2, u"no viajan los dos bloques: %r" % (_parches[0][1],))
+ok(_parches[0][1]["children"][0]["type"] == "bookmark", u"el bloque no es un marcador")
+
+# ⛔ Y se RELEE: que el parche conteste bien no prueba que los bloques hayan quedado.
+_leidos = []
+
+
+def _hijos_vacios(url, token=None):
+    _leidos.append(url)
+    return {"results": []}
+
+
+try:
+    S.Servicios(notion_get=_hijos_vacios, notion_patch=_patch_ok).enlazar_anexos("p-1", ["C-1"])
+    _paro = False
+except SystemExit as e:
+    _paro = "anexo" in str(e)
+ok(_paro, u"⛔ el parche contestó bien y los bloques NO están: se da por bueno")
+ok(_leidos, u"⛔ no RELEE la página: mandar no es comprobar")
+
+ok(S.Servicios(notion_get=_hijos_con_anexos, notion_patch=_patch_ok)
+  .enlazar_anexos("", ["C-1"]) is False, u"sin página no hay dónde enlazar")
+ok(S.Servicios(notion_get=_hijos_con_anexos, notion_patch=_patch_ok)
+  .enlazar_anexos("p-1", []) is False, u"sin anexos no hay nada que enlazar")
 
 # ── LA VERSIÓN DE LA API Y LA FORMA DEL CUERPO TIENEN QUE CUADRAR ─────
 # ⛔⛔ `notion_api.cuerpo_pagina` manda `parent = {"type": "data_source_id", …}`, que es la

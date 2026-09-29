@@ -125,6 +125,25 @@ ok(AX.cambios(["", "  ", "x"]) == {AX.COL_FINALES: '["x"]', AX.COL_CUANTOS: 1},
 ok(AX.cambios(["x"])[AX.COL_CUANTOS] == 1,
    u"el contador debería ir como número, no como texto")
 
+# ── Los bloques con que se enlazan en la página de Notion ───────────
+# ⛔ Copiarlos a Drive no es enlazarlos: un anexo archivado que la página no menciona **no
+#    existe** para quien lee el documento en Notion, que es donde el equipo lo lee.
+_b = AX.bloques(["C-1", "C-2"])
+ok(len(_b) == 2, u"no hay un bloque por anexo: %r" % (_b,))
+ok(_b[0]["type"] == "bookmark", u"el bloque no es un marcador: %r" % (_b[0],))
+ok(_b[0]["bookmark"]["url"] == "https://drive.google.com/file/d/C-1/view",
+   u"⛔ el enlace no apunta al fichero de Drive: %r" % (_b[0]["bookmark"],))
+ok(_b[1]["bookmark"]["url"].endswith("/C-2/view"), u"el segundo anexo no se enlaza")
+ok(_b[0]["object"] == "block", u"a Notion hay que decirle que es un bloque")
+# ⚠️ El orden es el de los ids: en un expediente de siete anexos, que salgan barajados
+#    obliga a abrirlos uno a uno para saber cuál es cuál.
+ok([x["bookmark"]["url"] for x in AX.bloques(["a", "b", "c"])] ==
+   ["https://drive.google.com/file/d/%s/view" % i_ for i_ in ("a", "b", "c")],
+   u"no respeta el orden de los ids: %r"
+   % ([x["bookmark"]["url"] for x in AX.bloques(["a", "b", "c"])],))
+ok(AX.bloques([]) == [] and AX.bloques(None) == [], u"sin anexos no hay bloques")
+ok(AX.bloques(["", "  ", "x"]) == AX.bloques(["x"]), u"no limpia los ids vacíos")
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))
