@@ -370,6 +370,14 @@ def _subir_ok(url, datos, nombre, token=None):
     return {"status": "uploaded"}
 
 
+def _leer_bloques_ok(url, token=None):
+    return {"results": [{"file": {"file_upload": {"id": "up-1"}}}]}
+
+
+def _leer_bloques_vacio(url, token=None):
+    return {"results": []}
+
+
 def _notion_subida(url, cuerpo, token=None):
     _pedidos.append((url, cuerpo))
     if url.endswith("/file_uploads"):
@@ -380,7 +388,7 @@ def _notion_subida(url, cuerpo, token=None):
 _pedidos = []
 dr = Drive()
 srv = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
-                  drive=dr, subir=_subir_ok)
+                  drive=dr, subir=_subir_ok, notion_get=_leer_bloques_ok)
 _dev = srv.publicar(_CON_FICHERO)
 ok([u for u, _c in _pedidos][0].endswith("/file_uploads"),
    "⛔ pide el hueco de subida DESPUÉS de crear la página: %r" % ([u for u, _c in _pedidos],))
@@ -395,7 +403,7 @@ ok([d[0] for d in dr.diario].count("get_media") == 1, "no baja el fichero de Dri
 dr = Drive(meta={"name": "gordo.pdf", "size": str(21 * 1024 * 1024)})
 try:
     S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
-                drive=dr, subir=_subir_ok).publicar(_CON_FICHERO)
+                drive=dr, subir=_subir_ok, notion_get=_leer_bloques_ok).publicar(_CON_FICHERO)
     _paro = False
 except SystemExit as e:
     _paro = "20 MiB" in str(e)
@@ -438,9 +446,32 @@ ok(S.NOTION_CREAR not in _ped2, "⛔ …y no haber creado la página")
 _pedidos = []
 dr = Drive()
 _d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
-                 drive=dr, subir=_subir_ok).publicar(FILA)
+                 drive=dr, subir=_subir_ok, notion_get=_leer_bloques_ok).publicar(FILA)
 ok(_d.get("notion_page_id") == "1a2b3c", "sin fichero debería crearse la página igual")
 ok("get_media" not in [x[0] for x in dr.diario], "sin fichero no debería bajarse nada")
+
+# ── Subir NO es verificar: se relee la página ─────────────────────────────────
+# ⛔ Que la subida diga `uploaded` prueba que el fichero llegó a Notion, NO que haya quedado
+#    colgado de la página. Es la misma distinción que tumbó `drive_primary_file_verified`.
+ok(S.Servicios(notion_get=_leer_bloques_ok).verificar_embebido("p-1", "up-1") is True,
+   "no ve el fichero que SÍ está en la página")
+ok(S.Servicios(notion_get=_leer_bloques_vacio).verificar_embebido("p-1", "up-1") is False,
+   "⛔ da por embebido un fichero que NO está en la página")
+ok(S.Servicios(notion_get=_leer_bloques_ok).verificar_embebido("p-1", "OTRO") is False,
+   "⛔ da por bueno un bloque con OTRA subida dentro")
+ok(S.Servicios(notion_get=_leer_bloques_ok).verificar_embebido("", "up-1") is False,
+   "sin id de página no hay nada que verificar")
+
+# ⛔ Y si tras crear la página el fichero no está, se dice: la página ya existe y no se puede
+#    deshacer, pero sí impedir que se marque como embebida.
+try:
+    S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
+                drive=Drive(), subir=_subir_ok,
+                notion_get=_leer_bloques_vacio).publicar(_CON_FICHERO)
+    _paro = False
+except SystemExit as e:
+    _paro = "NO está dentro" in str(e) or "no est" in str(e).lower()
+ok(_paro, "⛔ la página se creó sin el fichero y se dio por buena")
 
 print("%d comprobaciones" % hechas[0])
 if fallos:

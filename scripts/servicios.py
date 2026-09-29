@@ -62,6 +62,7 @@ HOJA_LIBRO = "1QoEY_5PYYidKlT2RNX_5m5Jq7-h-xfU_z6cZQ6pFSwE"
 PESTANA_LIBRO = "Base de Datos"
 NOTION_VERSION = "2022-06-28"
 NOTION_CREAR = "https://api.notion.com/v1/pages"
+NOTION_HIJOS = "https://api.notion.com/v1/blocks/%s/children"
 
 # ⚠️ Drive entero, no `readonly`: hay que CREAR la carpeta del expediente. Es el mismo
 #    alcance que ya piden `publish_temp_pdfs.py` y `fix_docx_publication_date.py`.
@@ -159,6 +160,17 @@ def http_subir(url, datos, nombre, token=None):
         return json.loads(r.read().decode("utf-8"))
 
 
+def http_notion_get(url, token=None):
+    """GET a Notion. Aparte del POST porque releer y escribir no son la misma operación."""
+    import urllib.request                                                # noqa: PLC0415
+    req = urllib.request.Request(
+        url, method="GET",
+        headers={"Authorization": "Bearer %s" % (token or _token_notion()),
+                 "Notion-Version": NOTION_VERSION})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 class Servicios(object):
     """Lo que el ejecutor llama. Cada método hace **una** cosa y no decide ninguna.
 
@@ -167,13 +179,16 @@ class Servicios(object):
     sólo ocurre cuando alguien lo pide explícitamente.
     """
 
-    def __init__(self, sheets=None, notion=None, drive=None, subir=None):
+    def __init__(self, sheets=None, notion=None, drive=None, subir=None, notion_get=None):
         self._sheets = sheets
         self._notion = notion or http_notion
         self._drive = drive
         # El envio del fichero en multipart: aparte del POST de JSON, porque es otra forma de
         # peticion y el banco necesita doblarla sola.
         self._subir = subir or http_subir
+        # ⚠️ Inyectable como los demás: si no, el banco acabaría pidiendo `NOTION_TOKEN` y
+        #    hablando con Notion de verdad — justo lo que un banco no puede hacer.
+        self._notion_get = notion_get or http_notion_get
 
     @property
     def sheets(self):
@@ -299,6 +314,12 @@ class Servicios(object):
                              "existe, y sin eso la pasada siguiente la crearía otra vez")
         extra["notion_page_id"] = pid
         extra["notion_page_url"] = str(r.get("url") or "")
+        # ⛔ Y se RELEE: que la subida dijera `uploaded` no prueba que el bloque haya quedado en
+        #    la página. Si no está, se dice — la página ya existe, así que no se puede deshacer,
+        #    pero sí impedir que se marque como embebida.
+        if subida and not self.verificar_embebido(pid, subida):
+            raise SystemExit("la página %s se creó pero el fichero NO está dentro: queda "
+                             "creada y hay que mirarla, no darla por publicada" % pid)
         return extra
 
     def _subir_fichero(self, fila):
@@ -335,6 +356,26 @@ class Servicios(object):
             raise SystemExit("la subida no terminó (%r): la página quedaría sin documento"
                              % (r.get("status"),))
         return sid
+
+    def verificar_embebido(self, pagina_id, subida_id):
+        """¿El fichero está **de verdad** dentro de la página? Relee los bloques y lo busca.
+
+        ⛔ EXISTE PORQUE «SUBIR» NO ES «VERIFICAR», que es la misma distinción que tumbó
+        `drive_primary_file_verified`: que la subida diga `uploaded` prueba que el fichero llegó
+        a Notion, **no** que haya quedado colgado de la página. Y en este proyecto ya está medido
+        que una escritura puede no hacer nada y decir que sí.
+        ⚠️ Se relee **la página**, no la subida: preguntarle a la subida por sí misma es la
+        comprobación que no puede fallar.
+        """
+        pid = str(pagina_id or "").strip()
+        if not pid:
+            return False
+        r = self._notion_get(NOTION_HIJOS % pid) or {}
+        for b in (r.get("results") or []):
+            f = (b.get("file") or {})
+            if str((f.get("file_upload") or {}).get("id") or "") == str(subida_id):
+                return True
+        return False
 
     def registrar(self, fila):
         """Paso 6: añade la fila al Libro de Datos y devuelve dónde quedó."""

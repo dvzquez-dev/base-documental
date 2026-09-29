@@ -61,9 +61,10 @@ CON_MODELO = (ANALIZAR,)
 # ✅ `notion_pdf_embedded` SALIÓ de aquí el 699.ª: el adaptador baja el fichero de Drive, lo
 #    sube a Notion y lo engancha a la página antes de crearla. Lo hace de verdad, así que
 #    dejarlo en esta lista habría parado expedientes que ya se pueden terminar.
-# ⚠️ `notion_embedding_verified` SE QUEDA: subir no es verificar, y comprobarlo exige releer
-#    la página. Es la misma distinción que tumbó `drive_primary_file_verified`.
-SIN_IMPLEMENTAR = ("notion_embedding_verified", "drive_folder_created",
+# ✅ Y `notion_embedding_verified` salió también: `publicar` **relee la página** y comprueba
+#    que el bloque del fichero está dentro. Subir no era verificar — por eso hacía falta la
+#    relectura, no una promesa.
+SIN_IMPLEMENTAR = ("drive_folder_created",
                    "drive_primary_file_verified", "drive_summary_created",
                    "domain_permission_verified")
 

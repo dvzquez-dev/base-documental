@@ -85,13 +85,15 @@ ok("no hace nadie" in por, "el por qué no dice que es algo sin implementar: %r"
 ok(any(b in por for b in P.SIN_IMPLEMENTAR),
    "el por qué no dice QUÉ falta, y sin eso no es accionable: %r" % por)
 ok(a != P.PUBLICAR, "¡republica y crearía una segunda página!")
-ok(len(P.SIN_IMPLEMENTAR) == 5, "las banderas sin implementar deberían ser 5: %d"
+ok(len(P.SIN_IMPLEMENTAR) == 4, "las banderas sin implementar deberían ser 4: %d"
    % len(P.SIN_IMPLEMENTAR))
 ok("notion_pdf_embedded" not in P.SIN_IMPLEMENTAR,
    "⛔ subir el fichero YA está implementado: dejarlo aquí pararía expedientes que se pueden "
    "terminar")
-ok("notion_embedding_verified" in P.SIN_IMPLEMENTAR,
-   "⛔ …pero VERIFICAR el embebido no: subir no es verificar, y exige releer la página")
+ok("notion_embedding_verified" not in P.SIN_IMPLEMENTAR,
+   "⛔ verificar el embebido YA se hace: `publicar` relee la página y busca el bloque")
+ok(all(b.startswith("drive_") or b.startswith("domain_") for b in P.SIN_IMPLEMENTAR),
+   "⛔ lo que queda sin implementar es TODO de Drive: %r" % (P.SIN_IMPLEMENTAR,))
 ok("notion_page_created" not in P.SIN_IMPLEMENTAR,
    "crear la página SÍ está implementado: meterlo aquí pararía todo desde el primer documento")
 
