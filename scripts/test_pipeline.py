@@ -77,16 +77,28 @@ ok(a == P.PUBLICAR, "sin identificador debería publicar de verdad; toca %r" % a
 _a_medias = sin(PUBLICADA, closed=F, notion_pdf_embedded=F, drive_folder_created=F)
 a, por = P.siguiente(_a_medias)
 ok(a == P.REVISAR, "con la página creada y el PDF sin subir debería ir a revisar; toca %r" % a)
-ok("no hace nadie" in por, "el por qué no dice que es algo sin implementar: %r" % por)
+ok("a medias" in por, "el por qué no dice por qué se para: %r" % por)
 # ⚠️ Ya no es `notion_pdf_embedded` — eso se implementó el 699.ª —, así que el caso pide la
 #    que sigue sin hacer nadie. Lo que se comprueba es que el motivo diga **cuál**, no cuál
 #    en concreto: atarlo a una bandera que puede implementarse mañana rompe el banco por una
 #    mejora.
-ok(any(b in por for b in P.SIN_IMPLEMENTAR),
+ok(any(b in por for b in C.PUBLICACION),
    "el por qué no dice QUÉ falta, y sin eso no es accionable: %r" % por)
 ok(a != P.PUBLICAR, "¡republica y crearía una segunda página!")
-ok(len(P.SIN_IMPLEMENTAR) == 2, "las banderas sin implementar deberían ser 2: %d"
-   % len(P.SIN_IMPLEMENTAR))
+# ⛔⛔ Y ya NO depende de que la bandera que falta esté «sin implementar». Mientras esa lista
+#    tuvo cosas dentro, el guardia sólo miraba ESAS: el día que se vaciara, una página ya
+#    creada con cualquier otra bandera a medias habría vuelto a PUBLICAR — y `publicar` crea
+#    la página, o sea una SEGUNDA página del mismo documento cada pasada. La lista se vacía
+#    hoy (→ 701.ª), así que el guardia pregunta lo que de verdad importa: **¿ya hay página?**
+ok(P.SIN_IMPLEMENTAR == (), "ya no queda ninguna bandera sin implementar: %r"
+   % (P.SIN_IMPLEMENTAR,))
+_a_medias2 = sin(PUBLICADA, closed=F, base_database_registered=F,
+                 domain_permission_verified=F)
+_a2, _p2 = P.siguiente(_a_medias2)
+ok(_a2 == P.REVISAR,
+   "⛔ con la página creada y UNA bandera cualquiera a medias vuelve a %r: crearía una "
+   "SEGUNDA página de Notion del mismo documento" % (_a2,))
+ok("domain_permission_verified" in _p2, "el motivo no dice cuál falta: %r" % (_p2,))
 ok("drive_primary_file_verified" not in P.SIN_IMPLEMENTAR,
    "⛔ archivar y VERIFICAR el fichero ya se hace: se relee la carpeta")
 ok("domain_permission_verified" not in P.SIN_IMPLEMENTAR,

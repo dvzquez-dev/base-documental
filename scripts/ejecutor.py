@@ -51,8 +51,14 @@ ATIENDE = {
     #    como cerrado, que **nadie vuelve a mirar**.
     #    ⚠️ Prometer de menos hace que el expediente se quede abierto y a la vista. Prometer de
     #    más lo entierra. No son simétricos.
+    #    ✅ 29/09: entran las dos últimas. `drive_summary_created` porque el resumen ejecutivo
+    #    ya se escribe como fichero en la carpeta — y va con prueba (`drive_summary_file_id`),
+    #    así que si el expediente no trae resumen la bandera **no se pone** (ver `EV.con_prueba`).
+    #    Y `drive_folder_created`, que no era una tarea: su propio código la define como «la
+    #    publicación entera está completa», y `publicar` sólo vuelve si todo lo demás salió.
     P.PUBLICAR: ("publicar", ("notion_page_created", "notion_pdf_embedded",
-                              "notion_embedding_verified", "drive_primary_file_verified",
+                              "notion_embedding_verified", "drive_folder_created",
+                              "drive_primary_file_verified", "drive_summary_created",
                               "domain_permission_verified")),
     P.REGISTRAR: ("registrar", ("base_database_registered",)),
     P.CERRAR: ("cerrar", ("closed",)),
@@ -141,8 +147,14 @@ def ejecutar_una(fila, servicios, n=0, aplicar=False):
         return Resultado(n, rid, accion, porque,
                          error=u"%s: %s" % (type(e).__name__, e))
 
-    return Resultado(n, rid, accion, porque, hecho=True, banderas=banderas,
-                     extra=_devuelto if isinstance(_devuelto, dict) else None)
+    # ⛔ Y la promesa se contrasta con la PRUEBA. `ATIENDE` es una lista escrita a mano, y una
+    #    lista escrita a mano envejece: el día que el servicio deje de hacer algo, la promesa
+    #    sigue ahí. Lo que decide es el identificador que el servicio devuelve.
+    #    ⚠️ Sólo al APLICAR: en seco no hay servicio que haya devuelto nada, y filtrar ahí
+    #       dejaría la pasada seca enseñando de menos justo cuando se lee para decidir.
+    _extra = _devuelto if isinstance(_devuelto, dict) else {}
+    return Resultado(n, rid, accion, porque, hecho=True,
+                     banderas=EV.con_prueba(banderas, fila, _extra), extra=_extra or None)
 
 
 def pasada(filas, servicios, aplicar=False):

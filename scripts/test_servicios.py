@@ -207,6 +207,15 @@ class _Permisos(object):
                                        "domain": self.dominio}]})
 
 
+class _Medio(object):
+    """El doble de `MediaInMemoryUpload`: guarda los bytes para poder LEERLOS en el caso.
+
+    ⚠️ Si sólo guardara que se llamó, un resumen con el texto equivocado saldría verde.
+    """
+    def __init__(self, datos, tipo):
+        self.datos, self.tipo = datos, tipo
+
+
 class Drive(object):
     def __init__(self, resp=None, meta=None, datos=b"PDFDATA", dominio="uvigo.es"):
         self.diario = []
@@ -603,6 +612,75 @@ finally:
     if _g is not None:
         os.environ["DOMINIO_EQUIPO"] = _g
 ok(_paro, "⛔ sin `DOMINIO_EQUIPO` debería pararse diciendo cuál falta")
+
+# ── El resumen ejecutivo, como fichero dentro de la carpeta ────────────
+# ⛔ El resumen YA EXISTE — lo genera el paso 2 y viaja en `executive_summary`. Aquí sólo se
+#    archiva. Lo que se prueba es que no se invente, que no se escriba vacío y que no se duplique.
+_RES = u"El informe recoge el ensayo estático del 12/09 con tres anomalías."
+_dr = Drive()
+_d = S.Servicios(drive=_dr, medio=_Medio).crear_resumen(dict(FILA, executive_summary=_RES), "F-exp")
+_cr = [k for a_, k in _dr.diario if a_ == "create"]
+ok(len(_cr) == 1, u"no crea el fichero del resumen: %r" % (_dr.diario,))
+ok(_cr and _cr[0]["body"]["parents"] == ["F-exp"],
+   u"⛔ el resumen no cuelga de la carpeta del expediente: %r" % (_cr[0]["body"],))
+ok(_cr and _cr[0]["body"]["name"].startswith("Informe_S-4012_27"),
+   u"el resumen no lleva la referencia en el nombre: nadie sabrá de qué documento es: %r"
+   % (_cr[0]["body"].get("name"),))
+ok(_cr and _cr[0].get("supportsAllDrives") is True,
+   u"sin `supportsAllDrives` fallaría en una unidad compartida")
+ok(_cr and "mimeType" not in _cr[0]["body"],
+   u"⚠️ un `mimeType` de carpeta ahí crearía una carpeta en vez de un fichero")
+ok(_d == {"drive_summary_file_id": "F-nueva"},
+   u"no devuelve el id del resumen, que es la PRUEBA de la bandera: %r" % (_d,))
+# El contenido es el resumen que vino, no otro texto.
+_med = _cr[0].get("media_body") if _cr else None
+_bytes = _med.datos if _med is not None else b""
+ok(_med is not None and _med.tipo == "text/plain",
+   u"el resumen no se sube como texto plano: %r" % (getattr(_med, "tipo", None),))
+ok(_bytes.decode("utf-8") == _RES,
+   u"⛔ el fichero no lleva el resumen que generó el paso 2: %r" % (_bytes[:60],))
+
+# ⛔ SIN resumen NO se crea un fichero vacío: quien lo abra creería que ya está mirado.
+for _vacio in (u"", u"   ", None):
+    _dr = Drive()
+    _d = S.Servicios(drive=_dr, medio=_Medio).crear_resumen(dict(FILA, executive_summary=_vacio), "F-exp")
+    ok(_d == {} and _dr.diario == [],
+       u"⛔ con `executive_summary`=%r crea un fichero de resumen VACÍO" % (_vacio,))
+# Sin carpeta tampoco: colgaría de la raíz de Drive.
+_dr = Drive()
+ok(S.Servicios(drive=_dr, medio=_Medio).crear_resumen(dict(FILA, executive_summary=_RES), "") == {}
+   and _dr.diario == [], u"⛔ sin carpeta el resumen colgaría de la raíz de Drive")
+
+# ⛔ Si Drive no devuelve el id, se para: sin él la pasada siguiente crearía un segundo resumen.
+try:
+    S.Servicios(drive=Drive({}), medio=_Medio).crear_resumen(dict(FILA, executive_summary=_RES), "F-exp")
+    _paro = False
+except SystemExit as e:
+    _paro = "resumen" in str(e)
+ok(_paro, u"⛔ Drive sin devolver id debería pararse y decirlo")
+
+# ── Y `publicar` lo usa ───────────────────────────────────────────
+# ⚠️ Probar el método suelto deja CIEGA la línea que lo llama: ya pasó con `verificar_en_carpeta`.
+_dr = Drive()
+_d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
+                 drive=_dr, medio=_Medio).publicar(dict(FILA, executive_summary=_RES))
+ok(_d.get("drive_summary_file_id") == "F-nueva",
+   u"⛔ `publicar` no archiva el resumen ejecutivo: %r" % (_d,))
+_cr = [k for a_, k in _dr.diario if a_ == "create"]
+ok(_cr and _cr[0]["body"]["parents"] == ["F-ya-existe"],
+   u"⛔ el resumen no va a la carpeta que YA tenía la fila: %r" % (_cr[0]["body"] if _cr else None,))
+# ⚠️ Y no depende de que haya fichero que mover: una fila sin `source_drive_file_id` tiene
+#    resumen igual, y sin este caso el resumen se colgaba de esa rama.
+ok("source_drive_file_id" not in FILA or not FILA.get("source_drive_file_id"),
+   u"el caso de arriba ya trae fichero: no prueba lo que dice")
+
+# ⚠️ Con el resumen ya archivado no se crea un segundo.
+_dr = Drive()
+_d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
+                 drive=_dr, medio=_Medio).publicar(dict(FILA, executive_summary=_RES,
+                                          drive_summary_file_id="F-ya"))
+ok([k for a_, k in _dr.diario if a_ == "create"] == [],
+   u"⛔ crea un SEGUNDO resumen teniendo ya `drive_summary_file_id`")
 
 print("%d comprobaciones" % hechas[0])
 if fallos:

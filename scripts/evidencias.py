@@ -86,6 +86,29 @@ def hay_prueba(valor):
     return bool(str(valor).strip())
 
 
+def con_prueba(banderas, fila, extra=None):
+    """De unas banderas prometidas, las que **se sostienen**. Tupla, en el orden que vino.
+
+    ⛔⛔ Es la cura general de algo que ya ha pasado CUATRO veces en este repo: dar por hecho lo
+    que no se hizo. Prometer banderas es una lista escrita a mano en `ejecutor.ATIENDE`, y una
+    lista escrita a mano envejece — el servicio cambia y la promesa se queda. Aquí la marca
+    depende de la **prueba**: si `PRUEBA_DE` dice con qué identificador se prueba una bandera y
+    ese identificador no está (ni lo devolvió el servicio ni lo traía ya la fila), la bandera
+    **no se escribe**. El expediente se queda a la vista, que es lo barato; enterrarlo no.
+    ⚠️ Una bandera SIN prueba declarada pasa tal cual. No es un descuido: inventarle una prueba
+    sería cambiar de tema, y filtrarlas todas dejaría al pipeline sin poder marcar nada.
+    """
+    fila = fila if isinstance(fila, dict) else {}
+    extra = extra if isinstance(extra, dict) else {}
+    fuera = []
+    for b in (banderas or ()):
+        prueba = PRUEBA_DE.get(b)
+        if prueba and not (hay_prueba(extra.get(prueba)) or hay_prueba(fila.get(prueba))):
+            continue
+        fuera.append(b)
+    return tuple(fuera)
+
+
 def ya_hecho(fila):
     """Las banderas que están sin poner y **tienen su prueba**. Lista ordenada de nombres.
 

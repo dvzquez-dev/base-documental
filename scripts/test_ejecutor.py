@@ -125,9 +125,16 @@ for a, (_n, bs) in sorted(E.ATIENDE.items()):
 #    y con las siete puestas `cierre` habría dado el expediente por publicado y lo habría
 #    cerrado. Un documento sin fichero en Drive, marcado cerrado, que nadie vuelve a mirar.
 ok(E.ATIENDE[P.PUBLICAR][1] == ("notion_page_created", "notion_pdf_embedded",
-                                "notion_embedding_verified", "drive_primary_file_verified",
+                                "notion_embedding_verified", "drive_folder_created",
+                                "drive_primary_file_verified", "drive_summary_created",
                                 "domain_permission_verified"),
    "publicar promete más banderas de las que hace: %r" % (E.ATIENDE[P.PUBLICAR][1],))
+# ✅ Son las SIETE de `cierre.PUBLICACION` menos el Libro, que lo registra otra acción. Que
+#    estén todas no repite el fallo de la 695.ª: entonces se prometían a ciegas y ahora cada
+#    una la respalda una llamada que se relee — y las que tienen prueba declarada se filtran.
+ok(set(E.ATIENDE[P.PUBLICAR][1]) ==
+   set(C.PUBLICACION) - set(["base_database_registered"]),
+   "publicar ya no promete justo lo que le toca: %r" % (E.ATIENDE[P.PUBLICAR][1],))
 ok(not set(E.ATIENDE[P.PUBLICAR][1]) & set(P.SIN_IMPLEMENTAR),
    "publicar promete alguna de las que NADIE implementa todavía")
 ok("base_database_registered" not in E.ATIENDE[P.PUBLICAR][1],
@@ -276,6 +283,38 @@ ok(_r.hecho is True, "sigue dándose por hecha")
 ok(E.ejecutar_una(POR_CERRAR, Doble(), aplicar=True).extra == {},
    "un servicio que devuelve None debería dejar `extra` vacío")
 ok(E.ejecutar_una(POR_CERRAR, Doble()).extra == {}, "en seco tampoco hay extra")
+
+# ── Una bandera con PRUEBA declarada no se pone sin la prueba ──────────
+# ⛔⛔ Es la CUARTA vez en este repo que algo se da por hecho sin estarlo. La cura no es mirar
+#    cada servicio: es que la marca dependa de la PRUEBA. Si `EV.PRUEBA_DE` dice que
+#    `drive_summary_created` se prueba con `drive_summary_file_id` y el servicio no lo devuelve,
+#    la bandera NO se escribe — y el expediente se queda a la vista en vez de enterrado.
+class _SinPrueba(object):
+    def publicar(self, fila):
+        return {"notion_page_id": "p-1"}          # ni resumen ni carpeta
+
+
+_r = E.ejecutar_una(dict(POR_PUBLICAR), _SinPrueba(), aplicar=True)
+ok(_r.hecho and not _r.error, u"el caso debería salir hecho: %r" % (_r.error,))
+ok("notion_page_created" in _r.banderas,
+   u"la bandera CON prueba debería ponerse: %r" % (_r.banderas,))
+ok("drive_summary_created" not in _r.banderas,
+   u"⛔ marca el resumen como creado sin que el servicio devuelva `drive_summary_file_id`")
+ok("notion_pdf_embedded" in _r.banderas,
+   u"⚠️ una bandera SIN prueba declarada no se puede filtrar: quitarla cambiaría de tema")
+
+# ⚠️ Y con la prueba en la FILA (de una pasada anterior) sí se pone: la prueba vale venga de
+#    donde venga, si no una reanudación dejaría banderas sin poner para siempre.
+_r = E.ejecutar_una(dict(POR_PUBLICAR, drive_summary_file_id="F-vieja"),
+                    _SinPrueba(), aplicar=True)
+ok("drive_summary_created" in _r.banderas,
+   u"la prueba ya anotada en la fila debería valer: %r" % (_r.banderas,))
+
+# ⚠️ En SECO no se filtra: la pasada seca enseña lo que se TOCARÍA, y aún no hay servicio que
+#    haya devuelto nada. Filtrar ahí dejaría la pasada seca enseñando de menos.
+_r = E.ejecutar_una(dict(POR_PUBLICAR), _SinPrueba(), aplicar=False)
+ok(_r.seco and "drive_summary_created" in _r.banderas,
+   u"la pasada seca debería enseñar TODAS las que tocaría: %r" % (_r.banderas,))
 
 print("%d comprobaciones" % hechas[0])
 if fallos:

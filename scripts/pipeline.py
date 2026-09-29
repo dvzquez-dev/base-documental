@@ -64,13 +64,13 @@ CON_MODELO = (ANALIZAR,)
 # ✅ Y `notion_embedding_verified` salió también: `publicar` **relee la página** y comprueba
 #    que el bloque del fichero está dentro. Subir no era verificar — por eso hacía falta la
 #    relectura, no una promesa.
-# ⚠️ `drive_primary_file_verified` SIGUE AQUÍ aunque el fichero ya se archive: mover no es
-#    verificar, igual que subir no era embeber. Verificarlo es releer la carpeta y comprobar
-#    que está dentro, y eso aún no se hace.
-# ✅ Quedan DOS: el resumen ejecutivo como fichero aparte, y `drive_folder_created`, que su
-#    propio código define como «la publicación entera está completa» — o sea que es la ÚLTIMA
-#    en ponerse, no una tarea. Se quedará aquí hasta que el resumen exista.
-SIN_IMPLEMENTAR = ("drive_folder_created", "drive_summary_created")
+# ✅ Y el 29/09 se vació: `publicar` archiva el fichero y lo RELEE en la carpeta, comparte con
+#    el dominio y lo relee, y escribe el resumen ejecutivo como fichero aparte. La última,
+#    `drive_folder_created`, no era una tarea: su propio código la define como «la publicación
+#    entera está completa», así que se pone al final, cuando lo demás ya salió bien.
+# ⚠️ La lista se queda (vacía) a propósito: es la puerta por la que una bandera nueva se
+#    declara «nadie la hace todavía» en vez de darse por hecha en silencio.
+SIN_IMPLEMENTAR = ()
 
 
 def siguiente(fila):
@@ -130,17 +130,21 @@ def siguiente(fila):
 
     faltan = [b for b in C.PUBLICACION if not C.es_si(fila.get(b))]
 
-    # ⛔ Lo que HOY no hace nadie: subir el fichero, embeberlo y todo el lado de Drive. Si la
-    #    página ya está creada y lo único que falta es eso, **no se vuelve a publicar** — eso
-    #    crearía una segunda página cada pasada — y **tampoco se da por hecho**. Se para y se
-    #    manda a mirar, que es lo único honesto mientras el adaptador no lo implemente.
-    _sin_manos = [b for b in faltan if b in SIN_IMPLEMENTAR]
-    if C.es_si(fila.get("notion_page_created")) and _sin_manos:
-        return REVISAR, (u"la página ya está creada y falta lo que aún no hace nadie: %s"
-                         % u", ".join(_sin_manos))
-
     if faltan == ["base_database_registered"]:
         return REGISTRAR, u"publicada y sin registrar en el Libro de Datos"
+    # ⛔⛔ LA PÁGINA YA CREADA MANDA. `publicar` **crea la página**, así que volver a llamarlo
+    #    con la página hecha deja una SEGUNDA página del mismo documento — y otra a la pasada
+    #    siguiente, y otra. Da igual qué bandera falte: si hay página y la publicación está a
+    #    medias, se para y lo mira una persona.
+    #    ⚠️ Va DESPUÉS de registrar el Libro a propósito: ese camino **no** crea página,
+    #       así que pararlo dejaría a mano un trabajo que el pipeline sabe hacer solo.
+    #    ⚠️ Antes esto sólo miraba las de `SIN_IMPLEMENTAR`, y al vaciarse esa lista el agujero
+    #    se abría solo, sin tocar este `if`: el guardia pedía por una lista que iba a quedarse
+    #    vacía, en vez de por la condición que hace daño.
+    if faltan and C.es_si(fila.get("notion_page_created")):
+        return REVISAR, (u"la página ya está creada y la publicación está a medias; falta: %s"
+                         % u", ".join(faltan))
+
     if faltan:
         return PUBLICAR, u"aprobada y sin publicar del todo, falta: %s" % u", ".join(faltan)
 

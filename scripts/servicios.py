@@ -171,6 +171,12 @@ def http_notion_get(url, token=None):
         return json.loads(r.read().decode("utf-8"))
 
 
+def medio_en_memoria(datos, tipo):
+    """El envoltorio que Drive pide para subir bytes. Import perezoso a propósito."""
+    from googleapiclient.http import MediaInMemoryUpload                  # noqa: PLC0415
+    return MediaInMemoryUpload(datos, mimetype=tipo)
+
+
 class Servicios(object):
     """Lo que el ejecutor llama. Cada método hace **una** cosa y no decide ninguna.
 
@@ -179,7 +185,8 @@ class Servicios(object):
     sólo ocurre cuando alguien lo pide explícitamente.
     """
 
-    def __init__(self, sheets=None, notion=None, drive=None, subir=None, notion_get=None):
+    def __init__(self, sheets=None, notion=None, drive=None, subir=None, notion_get=None,
+                 medio=None):
         self._sheets = sheets
         self._notion = notion or http_notion
         self._drive = drive
@@ -189,6 +196,10 @@ class Servicios(object):
         # ⚠️ Inyectable como los demás: si no, el banco acabaría pidiendo `NOTION_TOKEN` y
         #    hablando con Notion de verdad — justo lo que un banco no puede hacer.
         self._notion_get = notion_get or http_notion_get
+        # ⚠️ El envoltorio de subida de Drive, inyectable por lo mismo: `MediaInMemoryUpload`
+        #    vive en `googleapiclient`, que el banco NO tiene instalado (y no debe: el paso de
+        #    bancos del workflow corre ANTES del `pip install`).
+        self._medio = medio or medio_en_memoria
 
     @property
     def sheets(self):
@@ -322,6 +333,10 @@ class Servicios(object):
                 raise SystemExit("el fichero no consta en la carpeta del expediente tras "
                                  "moverlo: no se da por archivado")
             self.permiso_dominio(extra.get("drive_primary_file_id"))
+        # ⛔ El resumen ejecutivo va FUERA de esa rama: un expediente sin fichero que mover
+        #    tiene resumen igual, y colgarlo de ahí lo dejaba sin archivar sin decir nada.
+        if _carpeta and not str(fila.get("drive_summary_file_id") or "").strip():
+            extra.update(self.crear_resumen(fila, _carpeta))
 
         extra["notion_page_id"] = pid
         extra["notion_page_url"] = str(r.get("url") or "")
@@ -445,6 +460,29 @@ class Servicios(object):
                 return True
         raise SystemExit("el permiso de dominio no consta tras crearlo: el equipo no podría "
                          "abrir el documento y la página diría que sí")
+
+    def crear_resumen(self, fila, carpeta_id):
+        """Escribe el resumen ejecutivo como fichero de texto dentro de la carpeta.
+
+        ⛔ El resumen **ya existe**: lo genera el paso 2 y viaja en `executive_summary`. Aquí no
+        se inventa nada — se archiva lo que hay. Si no hay resumen, **no se crea un fichero
+        vacío**: un documento con un resumen en blanco es peor que uno sin resumen, porque el que
+        lo abra cree que ya está mirado.
+        """
+        texto = str(fila.get("executive_summary") or "").strip()
+        destino = str(carpeta_id or "").strip()
+        if not texto or not destino:
+            return {}
+        ref = str(fila.get("reference") or "documento").strip()
+        r = self.drive.files().create(
+            body={"name": u"%s — resumen.txt" % ref, "parents": [destino]},
+            media_body=self._medio(texto.encode("utf-8"), "text/plain"),
+            fields="id", supportsAllDrives=True).execute() or {}
+        sid = str(r.get("id") or "").strip()
+        if not sid:
+            raise SystemExit("Drive no devolvió el id del resumen: sin él no queda constancia y "
+                             "la pasada siguiente crearía otro")
+        return {"drive_summary_file_id": sid}
 
     def registrar(self, fila):
         """Paso 6: añade la fila al Libro de Datos y devuelve dónde quedó."""

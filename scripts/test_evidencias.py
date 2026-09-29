@@ -128,6 +128,39 @@ ok("anotarlo" in m[0], "el motivo no dice qué fue lo que falló: %r" % (m,))
 ok(EV.motivos(fila()) == [], "sin nada que anotar no debería haber motivos")
 ok(EV.motivos(None) == [], "None no debería reventar")
 
+# ── `con_prueba`: de lo prometido, lo que se sostiene ────────────────
+_TODAS = ("notion_page_created", "notion_pdf_embedded", "drive_summary_created")
+ok(EV.con_prueba(_TODAS, {}, {"notion_page_id": "p-1"}) ==
+   ("notion_page_created", "notion_pdf_embedded"),
+   u"⛔ marca el resumen sin que nadie devuelva `drive_summary_file_id`")
+ok(EV.con_prueba(_TODAS, {}, {"notion_page_id": "p-1", "drive_summary_file_id": "F-1"}) == _TODAS,
+   u"con las dos pruebas deberían pasar las tres")
+# La prueba vale venga del servicio o de la fila: si no, una reanudación dejaría la bandera
+# sin poner para siempre.
+ok("drive_summary_created" in EV.con_prueba(_TODAS, {"drive_summary_file_id": "F-vieja"}, {}),
+   u"la prueba ya anotada en la fila debería valer")
+# ⚠️ Una bandera SIN prueba declarada pasa tal cual: inventarle una sería cambiar de tema.
+ok(EV.con_prueba(("notion_pdf_embedded",), {}, {}) == ("notion_pdf_embedded",),
+   u"filtra una bandera que no tiene prueba declarada: se quedaría sin poder marcar nada")
+ok(EV.con_prueba(_TODAS, {}, {}) == ("notion_pdf_embedded",),
+   u"sin ninguna prueba sólo debería pasar la que no la declara: %r"
+   % (EV.con_prueba(_TODAS, {}, {}),))
+# El orden es el que vino, no el del diccionario: lo que se enseña va en el orden de `ATIENDE`.
+ok(EV.con_prueba(("drive_summary_created", "notion_page_created"), {},
+                 {"drive_summary_file_id": "F", "notion_page_id": "p"}) ==
+   ("drive_summary_created", "notion_page_created"), u"no respeta el orden que vino")
+ok(isinstance(EV.con_prueba(_TODAS, {}, {}), tuple), u"debería devolver una tupla")
+# ⛔ Un 0 NO es prueba, aquí también: no existe la fila 0 de una hoja.
+ok(EV.con_prueba(("base_database_registered",), {}, {"base_database_row": 0}) == (),
+   u"⛔ un `base_database_row` de 0 cuela como prueba")
+ok(EV.con_prueba(("base_database_registered",), {}, {"base_database_row": 18}) ==
+   ("base_database_registered",), u"la fila 18 SÍ es prueba")
+# Entradas raras no revientan.
+ok(EV.con_prueba((), {}, {}) == () and EV.con_prueba(None, None, None) == (),
+   u"entradas vacías no deberían reventar")
+ok(EV.con_prueba(_TODAS, "chusta", "chusta") == ("notion_pdf_embedded",),
+   u"una fila que no es un diccionario no debería reventar")
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))
