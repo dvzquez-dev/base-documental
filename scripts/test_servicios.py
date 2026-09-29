@@ -92,8 +92,14 @@ ok(S.HOJA_SOLICITUDES == "1EL5luWUYD5_3onxaDUSHmexzzQZEkPNLW1Y4QzzRg20",
    u"la hoja de SOLICITUDES ya no es la medida")
 ok(S.PESTANA_LIBRO == "Base de Datos",
    u"la pestaña del Libro ya no es la medida (lleva espacios: por eso se entrecomilla)")
-ok(S.ALCANCES == ["https://www.googleapis.com/auth/spreadsheets"],
+# ⚠️ Drive entero además de Sheets: hay que CREAR la carpeta del expediente. Es el mismo par
+#    que ya piden `publish_temp_pdfs.py` y `fix_docx_publication_date.py` — no se inventa un
+#    alcance nuevo, que es como se acaba pidiendo más permiso del que hace falta.
+ok(S.ALCANCES == ["https://www.googleapis.com/auth/drive",
+                  "https://www.googleapis.com/auth/spreadsheets"],
    u"el alcance de Google ya no es el del repo")
+ok("readonly" not in " ".join(S.ALCANCES),
+   u"con `drive.readonly` no se puede crear la carpeta, y el fallo llegaría en producción")
 
 # ── 3. Leer ────────────────────────────────────────────────────────────────────────────────
 sh = Sheets({"get": {"values": [["request_id"], ["R-1"]]}})
@@ -152,7 +158,33 @@ ok(sh.diario == [], u"⛔ …y además llegó a llamar al mundo")
 # ── 6. Publicar: devuelve la PRUEBA ────────────────────────────────────────────────────────
 FILA = {"title_short": u"Informe de ensayo", "unit_key": "propulsion",
         "document_type": u"Informe", "season_label": "2026/27",
-        "reference": "Informe_S-4012_27", "notion_data_source_id": "ds-1"}
+        "reference": "Informe_S-4012_27", "notion_data_source_id": "ds-1",
+        "subfolder_key": "general", "reserved_id": "4012",
+        # ⚠️ Con la carpeta YA creada: así este caso mide la página de Notion y no arrastra
+        #    también el camino de Drive. El caso de la carpeta va aparte, abajo.
+        "drive_folder_id": "F-ya-existe"}
+
+RUTAS_VALORES = [["unit_key", "subfolder_key", "range_start", "range_end",
+                  "drive_folder_id", "active"],
+                 ["propulsion", "general", "4001", "4099", "F-prop-gen", "TRUE"]]
+
+
+class _Files(object):
+    def __init__(self, diario, resp):
+        self.diario, self.resp = diario, resp
+
+    def create(self, **kw):
+        self.diario.append(("create", kw))
+        return _Ejec(self.resp)
+
+
+class Drive(object):
+    def __init__(self, resp=None):
+        self.diario = []
+        self._f = _Files(self.diario, resp if resp is not None else {"id": "F-nueva"})
+
+    def files(self):
+        return self._f
 _pedidos = []
 
 
@@ -258,6 +290,63 @@ finally:
     if _g is not None:
         os.environ["GDRIVE_SA_KEY"] = _g
 ok(_paro, u"⛔ sin `GDRIVE_SA_KEY` debería pararse diciendo cuál falta, no reventar con una traza")
+
+# ── La carpeta del expediente: se crea ANTES de la página, y sólo si no la hay ─────────
+# ⛔ Nombre = la referencia y padre = la carpeta-ruta que sale de `RUTAS` por RANGO. Y **no se
+#    toca `drive_folder_created`**: su propio código dice que esa bandera la decide el paso final
+#    «cuando el resto de la publicación esté completa». Aquí sólo se devuelve el id, que es cierto.
+_sin_carpeta = dict(FILA)
+_sin_carpeta.pop("drive_folder_id")
+dr = Drive()
+srv = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok, drive=dr)
+_dev = srv.publicar(_sin_carpeta)
+ok(dr.diario and dr.diario[0][0] == "create", u"no crea la carpeta del expediente")
+_cuerpo = dr.diario[0][1]["body"]
+ok(_cuerpo["name"] == "Informe_S-4012_27", u"la carpeta no se llama como la referencia: %r" % _cuerpo)
+ok(_cuerpo["parents"] == ["F-prop-gen"],
+   u"la carpeta no cuelga de la carpeta-ruta que sale de RUTAS: %r" % _cuerpo)
+ok(dr.diario[0][1].get("supportsAllDrives") is True,
+   u"sin `supportsAllDrives` fallaría en una unidad compartida")
+ok(_dev.get("drive_folder_id") == "F-nueva", u"no devuelve el id de la carpeta: %r" % (_dev,))
+ok(_dev.get("drive_folder_url", "").endswith("F-nueva"), u"no devuelve la URL de la carpeta")
+ok("drive_folder_created" not in _dev,
+   u"⛔ devuelve la BANDERA `drive_folder_created`: crear la carpeta NO es publicar, y su propio "
+   u"código dice que esa bandera la decide el paso final")
+ok(_dev.get("notion_page_id") == "1a2b3c", u"no devuelve también el id de la página")
+
+# ⛔ Si Drive no devuelve el id, se para: sin él no queda constancia de la carpeta y la pasada
+#    siguiente crearía otra con el mismo nombre. Sin este caso la guarda salía CIEGA — el doble
+#    siempre devolvía un id.
+_ped3 = []
+try:
+    S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
+                notion=lambda u, c, token=None: _ped3.append(1) or {"id": "x"},
+                drive=Drive({})).publicar(_sin_carpeta)
+    _paro = False
+except SystemExit as e:
+    _paro = u"carpeta" in str(e)
+ok(_paro, u"⛔ Drive sin devolver id debería pararse y decirlo")
+ok(_ped3 == [], u"⛔ …y no llegar a crear la página de Notion")
+
+# ⚠️ Con la carpeta ya creada NO se crea otra: dos carpetas con el mismo nombre y nadie sabe
+#    cuál es la buena.
+dr = Drive()
+S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
+            drive=dr).publicar(FILA)
+ok(dr.diario == [], u"⛔ crea una SEGUNDA carpeta teniendo ya `drive_folder_id`")
+
+# Y si la ruta no da carpeta, no se crea nada ni se publica: colgaría de la raíz de Drive.
+dr = Drive()
+_ped = []
+try:
+    S.Servicios(sheets=Sheets({"get": {"values": [RUTAS_VALORES[0]]}}),
+                notion=lambda u, c, token=None: _ped.append(1) or {"id": "x"},
+                drive=dr).publicar(_sin_carpeta)
+    _paro = False
+except SystemExit:
+    _paro = True
+ok(_paro and dr.diario == [] and _ped == [],
+   u"⛔ sin carpeta-ruta debería pararse antes de tocar Drive y Notion")
 
 print("%d comprobaciones" % hechas[0])
 if fallos:

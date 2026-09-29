@@ -47,6 +47,7 @@ for _f in (sys.stdout, sys.stderr):
     except Exception:  # pragma: no cover
         pass
 
+import drive_api as DA
 import hoja as H
 import libro_datos as LD
 import notion_api as NA
@@ -62,7 +63,11 @@ PESTANA_LIBRO = "Base de Datos"
 NOTION_VERSION = "2022-06-28"
 NOTION_CREAR = "https://api.notion.com/v1/pages"
 
-ALCANCES = ["https://www.googleapis.com/auth/spreadsheets"]
+# ⚠️ Drive entero, no `readonly`: hay que CREAR la carpeta del expediente. Es el mismo
+#    alcance que ya piden `publish_temp_pdfs.py` y `fix_docx_publication_date.py`.
+ALCANCES = ["https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/spreadsheets"]
+PESTANA_RUTAS = "RUTAS"
 
 # Lo que se tacha si asoma en un mensaje de error.
 _SECRETO = re.compile(r"(secret|token|private_key|Bearer\s+\S+|ya29\.\S+|ntn_\S+|secret_\S+)",
@@ -139,15 +144,23 @@ class Servicios(object):
     sólo ocurre cuando alguien lo pide explícitamente.
     """
 
-    def __init__(self, sheets=None, notion=None):
+    def __init__(self, sheets=None, notion=None, drive=None):
         self._sheets = sheets
         self._notion = notion or http_notion
+        self._drive = drive
 
     @property
     def sheets(self):
         if self._sheets is None:
             self._sheets = cliente_sheets()
         return self._sheets
+
+    @property
+    def drive(self):
+        if self._drive is None:
+            from googleapiclient.discovery import build                  # noqa: PLC0415
+            self._drive = build("drive", "v3", credentials=credenciales_google())
+        return self._drive
 
     # ── leer ────────────────────────────────────────────────────────────────────────────────
     def leer(self):
@@ -162,6 +175,13 @@ class Servicios(object):
         r = (self.sheets.spreadsheets().values()
              .get(spreadsheetId=HOJA_LIBRO, range=rango).execute())
         return (r.get("values", []) or [])[1:]
+
+    def leer_rutas(self):
+        """Las filas de `RUTAS` como diccionarios. La carpeta de destino sale de aquí."""
+        r = (self.sheets.spreadsheets().values()
+             .get(spreadsheetId=HOJA_SOLICITUDES, range=u"%s!A1:H" % PESTANA_RUTAS).execute())
+        filas, _dup = H.a_registros(r.get("values", []))
+        return filas
 
     def releer(self, claves):
         """`{A1: valor}` para las celdas que se acaban de escribir.
@@ -217,12 +237,35 @@ class Servicios(object):
                                           props)
         if cuerpo is None:
             raise SystemExit("no se publica: " + " | ".join(avisos))
+        # ⛔ La CARPETA primero, y sólo si no la hay ya. Crearla dos veces deja dos carpetas
+        #    con el mismo nombre y nadie sabe cuál es la buena.
+        #    ⚠️ Y NO se toca `drive_folder_created`: su propio código dice que esa bandera la
+        #    decide el paso final «cuando el resto de la publicación esté completa». Aquí sólo se
+        #    devuelve el id, que es un dato cierto: la carpeta existe.
+        extra = {}
+        if not str(fila.get("drive_folder_id") or "").strip():
+            padre = DA.carpeta_ruta(self.leer_rutas(), fila.get("unit_key"),
+                                    fila.get("subfolder_key"), fila.get("reserved_id"))
+            cuerpo_c, motivos_c = DA.cuerpo_carpeta(fila.get("reference"), padre)
+            if cuerpo_c is None:
+                raise SystemExit("no se crea la carpeta: " + " | ".join(motivos_c))
+            creada = self.drive.files().create(body=cuerpo_c, fields="id",
+                                               supportsAllDrives=True).execute()
+            fid = str((creada or {}).get("id") or "").strip()
+            if not fid:
+                raise SystemExit("Drive no devolvió el id de la carpeta: sin él no queda "
+                                 "constancia y la pasada siguiente crearía otra")
+            extra["drive_folder_id"] = fid
+            extra["drive_folder_url"] = DA.url_de(fid)
+
         r = self._notion(NOTION_CREAR, cuerpo) or {}
         pid = str(r.get("id") or "").strip()
         if not pid:
             raise SystemExit("Notion no devolvió el id de la página: no se puede anotar que "
                              "existe, y sin eso la pasada siguiente la crearía otra vez")
-        return {"notion_page_id": pid, "notion_page_url": str(r.get("url") or "")}
+        extra["notion_page_id"] = pid
+        extra["notion_page_url"] = str(r.get("url") or "")
+        return extra
 
     def registrar(self, fila):
         """Paso 6: añade la fila al Libro de Datos y devuelve dónde quedó."""
