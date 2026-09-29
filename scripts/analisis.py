@@ -173,5 +173,104 @@ def revisar_analisis(calidad, tags_json):
     return {"severidad": sev, "avisos": avs, "etiquetas": etqs}, motivos
 
 
+# ── El encargo: qué se le pide al modelo y qué se hace con lo que conteste ─────────────────
+# ⛔ Un resumen más corto que esto no es un resumen. `crear_resumen` se niega a archivar un
+#    fichero vacío —con razón: *«un documento con un resumen en blanco es peor que uno sin
+#    resumen»*—, así que dejarlo pasar deja el expediente publicado sin nada que leer.
+MIN_RESUMEN = 20
+
+
+def prompt_de(fila):
+    """El encargo del paso 2, con los datos del expediente dentro.
+
+    ⛔ **Nombra el título, el tipo y la unidad**: sin eso el modelo resume a ciegas y el resumen
+    sale genérico, que es exactamente lo que el revisor no necesita.
+    ⛔ **Pide JSON explícitamente y nombra las claves y los tres niveles.** `modelo.leer_json`
+    sabe rebuscar el objeto entre la prosa, pero eso es el **paracaídas, no el plan**; y si no se
+    nombran los niveles el modelo se inventa su vocabulario y `severidad()` devuelve `None` —
+    correcto, y deja el expediente sin severidad.
+    """
+    f = fila if isinstance(fila, dict) else {}
+
+    def _c(k, sino=u"(sin dato)"):
+        return str(f.get(k) or "").strip() or sino
+
+    return (
+        u"Eres el analista documental de UVigo Aerotech: Solaris, un equipo universitario de\n"
+        u"cohetería. Analiza el documento que se te indica y devuelve SOLO un objeto JSON.\n"
+        u"\n"
+        u"EXPEDIENTE\n"
+        u"  Referencia : %s\n"
+        u"  Título     : %s\n"
+        u"  Tipo       : %s\n"
+        u"  Unidad     : %s\n"
+        u"  Autor      : %s\n"
+        u"  Temporada  : %s\n"
+        u"\n"
+        u"DEVUELVE UN OBJETO JSON con exactamente estas claves:\n"
+        u"  \"resumen\"    : resumen ejecutivo en español, de 2 a 4 frases. Lo lee quien tiene\n"
+        u"                 que aprobar el documento sin abrirlo, así que di QUÉ contiene y\n"
+        u"                 PARA QUÉ sirve, no que «es un informe».\n"
+        u"  \"etiquetas\"  : lista de 2 a 6 etiquetas temáticas. Sin comas dentro de una\n"
+        u"                 etiqueta: se indexan en un multi-select y una coma la partiría\n"
+        u"                 en dos.\n"
+        u"  \"severidad\"  : uno de \"%s\", exactamente. Es la urgencia con la que hay que\n"
+        u"                 mirar el documento antes de aprobarlo, no su importancia.\n"
+        u"  \"avisos\"     : lista de problemas de calidad concretos y accionables (falta la\n"
+        u"                 fecha, la referencia no coincide, secciones vacías…). Lista vacía\n"
+        u"                 si no hay ninguno.\n"
+        u"\n"
+        u"Si la severidad es \"media\" o \"alta\", tiene que venir con al menos un aviso que la\n"
+        u"justifique. No añadas texto fuera del JSON.\n"
+        % (_c("reference"), _c("doc_title"), _c("doc_type"), _c("unit_label"),
+           _c("author_name"), _c("season"), u'", "'.join(NIVELES))
+    )
+
+
+def de_la_respuesta(datos):
+    """`(columnas, motivos)`: qué escribir en `SOLICITUDES` con lo que contestó el modelo.
+
+    ⛔⛔ **`analyzed` solo se marca si el análisis vino ENTERO.** Un paso que escribe la bandera
+    sin los datos deja el expediente **dado por analizado sin análisis**, y el siguiente paso lo
+    publica: el revisor abre la ficha y no ve ni resumen ni avisos, que es justo lo que tiene que
+    leer antes de aprobar. Por eso `servicios.analizar` se negaba en voz alta hasta hoy — y esta
+    función existe para poder dejar de negarse **sin perder esa garantía**.
+
+    ⚠️ **Sin etiquetas SÍ se da por analizado**: no todo documento tiene etiquetas que poner, y
+    exigirlas pararía expedientes correctos. La columna queda como `[]`, no vacía.
+
+    ⚠️ Reutiliza `severidad`, `avisos` y `etiquetas`, que ya saben lo que de verdad llega:
+    `LOW_MEDIUM`, las dos lenguas, y las listas **separadas por comas** (`hoja.lista_de_celda`).
+    """
+    d = _dict(datos)
+    motivos = []
+
+    resumen = str(d.get("resumen") or d.get("executive_summary") or "").strip()
+    if len(resumen) < MIN_RESUMEN:
+        motivos.append(u"el resumen ejecutivo falta o es demasiado corto (%d caracteres): sin él "
+                       u"no hay nada que archivar y el revisor decide sin leerlo"
+                       % len(resumen))
+
+    cruda = d.get("severidad", d.get("severity"))
+    sev = severidad(cruda)
+    if sev is None:
+        motivos.append(u"la severidad %r no es un nivel reconocible: la tarjeta la dejaría en "
+                       u"blanco y el revisor decidiría sin verla" % (cruda,))
+
+    avs = avisos(d)
+    etqs, m_etq = etiquetas(d.get("etiquetas", d.get("tags")))
+    motivos.extend(m_etq)
+
+    columnas = {
+        "executive_summary": resumen,
+        "quality_issues": json.dumps({"severity": sev, "issues": avs}, ensure_ascii=False),
+        "tags_json": json.dumps(etqs, ensure_ascii=False),
+    }
+    # ⛔ La bandera va al final y SOLO con las dos cosas que el resto del pipeline da por hechas.
+    if resumen and len(resumen) >= MIN_RESUMEN and sev is not None:
+        columnas["analyzed"] = "TRUE"
+    return columnas, motivos
+
+
 if __name__ == "__main__":  # pragma: no cover
     print("La frontera con el modelo. Para probarla: python scripts/test_analisis.py")

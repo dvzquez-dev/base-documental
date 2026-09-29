@@ -143,7 +143,17 @@ def ejecutar_una(fila, servicios, n=0, aplicar=False):
 
     try:
         _devuelto = fn(fila)
-    except Exception as e:
+    # ⛔⛔ `SystemExit` VA AQUÍ EXPLÍCITAMENTE, y no es paranoia: es lo que lanza
+    #    `servicios.analizar` cuando no puede hacer el análisis —a propósito, para no dar por
+    #    analizado lo que no lo está—, y cuelga de `BaseException`, así que un `except Exception`
+    #    **no lo caza**. Con él fuera, la promesa de arriba («nunca lanza») era falsa justo en el
+    #    único sitio donde hoy se usa: la pasada moría en ese expediente y los 40 siguientes se
+    #    quedaban sin tocar, con pinta de «el pipeline va lento» cuando está parado.
+    #    ⚠️ Misma familia que el `bajar` que prometía «no lanza NUNCA» con un `except Exception`
+    #    mientras `cli` lanzaba `SystemExit`.
+    # ⚠️ Y `KeyboardInterrupt` NO entra: si alguien corta la pasada a mano, tragárselo la dejaría
+    #    corriendo sin forma de pararla. No todo `BaseException` se trata igual.
+    except (Exception, SystemExit) as e:
         return Resultado(n, rid, accion, porque,
                          error=u"%s: %s" % (type(e).__name__, e))
 

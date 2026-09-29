@@ -204,6 +204,82 @@ ok(rs[2].hecho is True, "¡el fallo de la fila 2 dejó sin tocar la 3!")
 ok([c[0] for c in d.llamadas] == ["analizar", "publicar", "cerrar"],
    "la pasada no siguió tras el fallo: %r" % (d.llamadas,))
 
+# ── 5b. ⛔⛔ Y `SystemExit` NO ES UNA EXCEPCIÓN CUALQUIERA: NO LA CAZA UN `except Exception` ──
+# Es el caso REAL, no uno inventado: `servicios.analizar` se niega en voz alta con
+# `raise SystemExit(...)` — a propósito, para que una pasada no dé por analizado lo que no lo
+# está —, y `SystemExit` cuelga de `BaseException`. Con un `except Exception` **se escapa**, y
+# entonces la promesa del docstring de `ejecutar_una` («nunca lanza») es falsa justo en el único
+# sitio donde hoy se usa. El modo de fallo es el que ese docstring dice que no puede pasar: la
+# pasada **muere en el expediente 3** y los 40 siguientes se quedan sin tocar, con pinta de
+# «el pipeline va lento» cuando está parado.
+# ⚠️ Y es la misma familia que ya mordió aquí antes: `bajar` prometía «no lanza NUNCA» con un
+#    `except Exception` y `cli` lanzaba `SystemExit`.
+class Suicida(object):
+    """Como el `servicios` de verdad: `analizar` se planta con `SystemExit`."""
+
+    def __init__(self):
+        self.llamadas = []
+
+    def analizar(self, f):
+        self.llamadas.append("analizar")
+        raise SystemExit(u"el an\xe1lisis no se pudo hacer: no encuentro Claude Code")
+
+    def publicar(self, f):
+        self.llamadas.append("publicar")
+
+    def registrar(self, f):
+        self.llamadas.append("registrar")
+
+    def cerrar(self, f):
+        self.llamadas.append("cerrar")
+
+
+d = Suicida()
+try:
+    rs = E.pasada([SIN_ANALIZAR, POR_PUBLICAR, POR_CERRAR], d, aplicar=True)
+    _escapo = False
+except BaseException:
+    rs, _escapo = [], True
+ok(_escapo is False,
+   u"⛔⛔ un `SystemExit` del servicio SE ESCAPA y mata la pasada entera: `except Exception` no "
+   u"caza `BaseException`, y `servicios.analizar` lanza exactamente eso")
+ok(len(rs) == 3, u"la pasada debería devolver 3 resultados: %d" % len(rs))
+ok(rs and rs[0].error is not None, u"el plante no se recoge como error de esa fila")
+ok(rs and "SystemExit" in (rs[0].error or ""),
+   u"el error no dice de qué tipo fue: %r" % (rs[0].error if rs else None,))
+ok(rs and "Claude Code" in (rs[0].error or ""),
+   u"se pierde lo que dijo el servicio, que es lo único accionable: %r"
+   % (rs[0].error if rs else None,))
+ok(rs and rs[0].hecho is False, u"una fila que se plantó no puede contar como hecha")
+ok(rs and rs[2].hecho is True,
+   u"⛔ el plante de la fila 1 dejó sin tocar la 3: es el daño entero de esta regla")
+ok(d.llamadas == ["analizar", "publicar", "cerrar"],
+   u"la pasada no siguió tras el plante: %r" % (d.llamadas,))
+
+# ⚠️ Pero un `KeyboardInterrupt` SÍ tiene que subir: si Daniel corta la pasada a mano, tragarse
+#    el Ctrl-C la dejaría corriendo y sin forma de pararla. No todo `BaseException` es igual.
+class Cortada(object):
+    def analizar(self, f):
+        raise KeyboardInterrupt()
+
+    def publicar(self, f):
+        pass
+
+    def registrar(self, f):
+        pass
+
+    def cerrar(self, f):
+        pass
+
+
+try:
+    E.pasada([SIN_ANALIZAR], Cortada(), aplicar=True)
+    _subio = False
+except KeyboardInterrupt:
+    _subio = True
+ok(_subio is True,
+   u"⛔ se traga el Ctrl-C: la pasada seguiría corriendo sin forma de pararla a mano")
+
 # Un servicio que no existe se dice, no se traga.
 class Manco(object):
     def analizar(self, f):

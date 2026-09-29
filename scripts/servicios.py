@@ -359,13 +359,38 @@ class Servicios(object):
 
     # ── los pasos ───────────────────────────────────────────────────────────────────────────
     def analizar(self, fila):
-        """Paso 2. **No implementado aquí a propósito**: es la única llamada a un modelo.
+        """Paso 2: el análisis, **preguntándole a Claude Code en local**.
 
-        ⛔ Se niega en voz alta en vez de devolver sin hacer nada. Un paso que calla y no hace
-        deja la bandera puesta y el expediente dado por analizado **sin análisis**.
+        ⛔ **No es la API de Anthropic y no puede serlo.** Decisión de Daniel de julio de 2026,
+        en `ARRANQUE.md` §3.6 del panel y en `rutinas/README.md`: *«NADA de `ANTHROPIC_API_KEY`
+        ni de GitHub Action ejecutando Claude — la API cobra por token»*. Se corre sobre la
+        **suscripción**, con el binario `claude`, y el destino es un **minipc**. El cómo vive en
+        `modelo.py`, que a su vez usa `claude_local.py` — el mismo fichero que el `gate.py` del
+        panel, no una copia suya.
+
+        ⛔⛔ **Y sigue sin marcar como analizado lo que no lo está**, que era lo único que
+        garantizaba negarse: si el modelo no contesta, o contesta sin resumen o sin una severidad
+        reconocible, esto **se planta**. La bandera `analyzed` la pone `de_la_respuesta` y sólo
+        con el análisis entero. Un paso que escribe la bandera sin los datos deja el expediente
+        dado por analizado **sin análisis**, y el siguiente paso lo publica: el revisor abre la
+        ficha y no ve ni resumen ni avisos, que es justo lo que tiene que leer antes de aprobar.
+
+        ⚠️ Plantarse **no mata la pasada**: `ejecutor.ejecutar_una` caza también `SystemExit`
+        —cuelga de `BaseException`— y lo devuelve como el error de *esta* fila. Los demás
+        expedientes siguen.
         """
-        raise SystemExit("`analizar` es el paso del modelo y no vive en el adaptador: hoy lo "
-                         "sigue haciendo Cowork. Esta pasada NO debe marcarlo como hecho")
+        import analisis as A
+        import modelo as M
+
+        r = M.preguntar(A.prompt_de(fila))
+        if not r.get("ok"):
+            raise SystemExit(u"el análisis no se pudo hacer: %s" % (r.get("motivo") or u"?"))
+
+        columnas, motivos = A.de_la_respuesta(r.get("datos"))
+        if columnas.get("analyzed") != "TRUE":
+            raise SystemExit(u"el modelo contestó pero el análisis no vale: %s"
+                             % (u" | ".join(motivos) or u"sin motivo"))
+        return columnas
 
     def fuente_de_datos(self):
         """El `data_source_id` donde se publica. De la variable, o **deducido de la base**.
