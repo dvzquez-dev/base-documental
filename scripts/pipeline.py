@@ -33,6 +33,7 @@ for _f in (sys.stdout, sys.stderr):
 
 import cierre as C
 import evidencias as EV
+import sustitucion as SU
 
 
 # Las acciones que el pipeline sabe hacer, en el orden en que ocurren.
@@ -73,7 +74,7 @@ CON_MODELO = (ANALIZAR,)
 SIN_IMPLEMENTAR = ()
 
 
-def siguiente(fila):
+def siguiente(fila, cadena=None):
     """`(acción, por_qué)` para un expediente. Nunca lanza; una fila rara devuelve `REVISAR`.
 
     El orden sale de las banderas medidas en `SOLICITUDES`, no de lo que parezca razonable:
@@ -113,6 +114,18 @@ def siguiente(fila):
         return ESPERAR, u"analizada y esperando a que alguien decida en la app"
 
     if decisiones == ["changes_requested"]:
+        # ⛔⛔ …salvo que la reentrega YA haya llegado. Medido el 29/09: de las **cuatro**
+        #    filas esperando reenvío, **TRES ya lo habían recibido**, y el pipeline las dejaba
+        #    esperando para siempre — que es exactamente el estado en que nadie las vuelve a
+        #    mirar. Cerrarlas aquí sería decidir por una persona; se manda a mirar **diciendo
+        #    quién** la reentregó, que es lo único accionable.
+        # ⛔ Por la puerta de `sustitucion`, no por una copia: el criterio estuvo
+        #    escrito aquí también, y la copia salió CIEGA a la mutación que le quitaba
+        #    la exclusión de sí misma — dos copias que hoy coinciden por casualidad.
+        quien = SU.quien_sustituye(fila, cadena)
+        if quien:
+            return REVISAR, (u"pidió cambios y la reentrega YA llegó (%s): sigue abierta "
+                             u"esperando algo que ya pasó" % quien)
         return REENVIO, u"cambios pedidos: espera a que el autor reenvíe"
 
     if decisiones == ["rejected"]:
@@ -167,12 +180,15 @@ def reparto(filas):
     error que se quiere evitar: la diferencia entre *cero* y *no lo sé* tiene que verse.
     """
     fuera = dict((a, []) for a in ACCIONES)
+    # ⚠️ La cadena se calcula AQUÍ, una vez. Pedírsela al que llama es pedirle que se acuerde,
+    #    y el que no se acuerde tendrá el fallo de vuelta: filas esperando para siempre.
+    cadena = SU.sustituidas(filas)
     for i, f in enumerate(filas):
         n = i + 2
         rid = u"(sin request_id)"
         if isinstance(f, dict):
             rid = str(f.get("request_id") or "").strip() or rid
-        accion, porque = siguiente(f)
+        accion, porque = siguiente(f, cadena)
         fuera[accion].append((n, rid, porque))
     return fuera
 

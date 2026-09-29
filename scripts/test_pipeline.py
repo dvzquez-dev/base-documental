@@ -17,6 +17,7 @@ for _f in (sys.stdout, sys.stderr):
 
 import cierre as C
 import pipeline as P
+import sustitucion as SU
 
 fallos = []
 hechas = [0]
@@ -219,6 +220,41 @@ ok("Revisor" in _p, u"el motivo no dice QUÉ falta, y sin eso no es accionable: 
 # ⚠️ Y sin nada pendiente sigue cerrando: la guarda no puede parar el camino bueno.
 ok(P.siguiente(sin(PUBLICADA, closed=F))[0] == P.CERRAR,
    u"una publicada entera y sin pendientes debería cerrarse")
+
+# ── UNA FILA YA REENTREGADA NO ESPERA UN REENVÍO QUE YA LLEGÓ ──────
+# ⛔⛔ Medido el 29/09 contra `SOLICITUDES`: de las **cuatro** filas en `esperar_reenvio`,
+#    **TRES ya habían recibido su reentrega** — las filas 7, 8 y 13, reentregadas por la 8, la 9
+#    y la 16. Sin la cadena, el pipeline las deja esperando **para siempre** algo que ya pasó, y
+#    un expediente que espera para siempre es exactamente uno que nadie vuelve a mirar.
+_ORIG = sin(CAMBIOS, closed=F)
+_ORIG["request_id"] = "SOL-ORIG"
+_ORIG["reference"] = "Informe_S-6009_26"
+_REENT = {"request_id": "SOL-NUEVA", "reference": "Informe_S-6009_26",
+          "replaces_document": "SOL-ORIG", "replacement_reference": "Informe_S-6009_26",
+          "replacement_reason": "cambios en el formato"}
+
+ok(P.siguiente(_ORIG)[0] == P.REENVIO, u"sin reentrega, sigue esperando (es lo correcto)")
+_a, _p = P.siguiente(_ORIG, SU.sustituidas([_ORIG, _REENT]))
+ok(_a != P.REENVIO,
+   u"⛔ sigue esperando un reenvío que YA llegó: el expediente se queda ahí para siempre")
+ok(_a == P.REVISAR, u"debería mandarlo a mirar: toca %r" % (_a,))
+ok("SOL-NUEVA" in _p, u"el motivo no dice QUIÉN lo reentregó, que es lo único accionable: %r"
+   % (_p,))
+
+# ⚠️ Y el reparto lo calcula él solo: pedirle al que llama que pase las claves es pedirle que
+#    se acuerde, y el que no se acuerde tendrá el fallo de vuelta.
+_rep = P.reparto([_ORIG, _REENT])
+ok(_rep[P.REENVIO] == [],
+   u"⛔ `reparto` no sigue la cadena y deja la fila esperando: %r" % (_rep[P.REENVIO],))
+ok([x[1] for x in _rep[P.REVISAR]][:1] == ["SOL-ORIG"],
+   u"la original debería salir a revisar: %r" % (_rep[P.REVISAR],))
+# ⚠️ La reentrega de este caso va también a revisar, pero por otra cosa — no trae
+#    `received`. Es ruido del fixture, no del enrutado; por eso se mira POR NOMBRE y no
+#    por cuántas hay: contar habría atado el caso a un detalle que no es el tema.
+
+# ⚠️ Sin cadena, nada cambia: las claves vacías no pueden alterar una sola fila.
+ok(P.siguiente(_ORIG, {})[0] == P.REENVIO, u"con claves vacías debería seguir esperando")
+ok(P.siguiente(_ORIG, None)[0] == P.REENVIO, u"con claves None también")
 
 print("%d comprobaciones" % hechas[0])
 if fallos:
