@@ -222,6 +222,18 @@ _l, _ = CLI.revisar_datos(
 ok(not [l for l in _l if l.startswith("ANEXOS")],
    u"⛔ canta sobre unos anexos en regla que venían por comas: %r" % (_l,))
 
+# ── El repaso canta un id de Drive con basura dentro ──────────────
+_l, _ = CLI.revisar_datos(
+    [["request_id", "drive_folder_id", "closed"],
+     ["SOL-9", "'1x9r1xo4X4wcCtNy1Crd7zc8bJm-6UC6X", "FALSE"]], [])
+ok(any(l.startswith("ID  ") for l in _l), u"⛔ el repaso no mira los ids: %r" % (_l,))
+ok(any("drive_folder_id" in l for l in _l), u"no dice qué columna: %r" % (_l,))
+ok(any("SOL-9" in l for l in _l), u"no dice de qué expediente es")
+_l, _ = CLI.revisar_datos(
+    [["request_id", "drive_folder_id", "closed"],
+     ["SOL-8", "1x9r1xo4X4wcCtNy1Crd7zc8bJm-6UC6X", "FALSE"]], [])
+ok(not [l for l in _l if l.startswith("ID  ")], u"canta sobre un id bueno: %r" % (_l,))
+
 # ── El repaso mira también las CADENAS de reentrega ───────────────
 # ⚠️ `sustitucion.revisar` se escribió entero y **nadie lo llamaba**: la misma forma que ya
 #    dejó muertas `analisis.etiquetas` y media `notion_api`. Un revisor que no corre no revisa.

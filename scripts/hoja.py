@@ -28,6 +28,7 @@ Cómo se prueba
 `python scripts/test_hoja.py` — sin red ni credenciales.
 """
 import json
+import re
 import sys
 
 for _f in (sys.stdout, sys.stderr):
@@ -185,6 +186,41 @@ def desplazadas(registros):
                 int(txt)
             except (TypeError, ValueError):
                 avisos.append((i + 2, rid, col, txt[:60]))
+    return avisos
+
+
+# ⛔⛔ Las columnas que llevan un **id de Drive**. Medido el 29/09/2026 (BI1:BM18): la fila 6
+#    tiene `drive_folder_id` con una **comilla simple delante** — la que Sheets usa para forzar
+#    texto— y la URL de al lado, en la misma fila, lleva el id **sin** ella.
+#    ⚠️ Lo que hace: la carpeta **parece existir** (la celda no está vacía), así que no se crea
+#       ninguna y luego se intenta archivar el fichero en un id que **Drive no conoce**. El fallo
+#       llega de Drive, tarde, y con el expediente a medias.
+#    ⛔ Aquí NO va `notion_page_id`: los de Notion llevan guiones y no tienen esta forma.
+COLUMNAS_ID = ("drive_folder_id", "drive_primary_file_id", "drive_summary_file_id",
+               "drive_docx_file_id", "drive_route_folder_id", "source_drive_file_id")
+
+# Un id de Drive: letras, cifras, `_` y `-`, y **al menos 20**. Los de fichero rondan los 33 y
+# los de documento de Google los 44 — cuatro de los resumenes reales son documentos.
+_ID_DRIVE = re.compile(r"^[A-Za-z0-9_-]{20,}$")
+
+
+def ids_raros(registros):
+    """Celdas de id que no tienen forma de id. `(fila_1based, request_id, columna, valor)`.
+
+    ⚠️ Una celda **vacía no es síntoma**: la mayoría de las filas las tienen en blanco, y cantar
+    por eso enseña a ignorar el aviso.
+    """
+    avisos = []
+    for i, r in enumerate(registros or []):
+        if not isinstance(r, dict):
+            continue
+        rid = str(r.get("request_id") or "").strip() or u"(sin request_id)"
+        for col in COLUMNAS_ID:
+            crudo = r.get(col)
+            txt = u"" if crudo is None else str(crudo).strip()
+            if not txt or _ID_DRIVE.match(txt):
+                continue
+            avisos.append((i + 2, rid, col, txt[:60]))
     return avisos
 
 

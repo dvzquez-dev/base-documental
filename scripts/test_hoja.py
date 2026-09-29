@@ -235,6 +235,47 @@ ok("annex_copied_count" in H.COLUMNAS_ENTERAS and "range_end" in H.COLUMNAS_ENTE
 ok("closed" not in H.COLUMNAS_ENTERAS,
    u"una bandera no es un número: meterla aquí pondría roja media hoja")
 
+# ── UN ID DE DRIVE CON UNA COMILLA DELANTE ─────────────────────
+# ⛔⛔ REAL, medido el 29/09/2026 (BI1:BM18): la fila 6 (`SOL-DOC-20260705-180914-1ISFHFCY`)
+#    tiene `drive_folder_id` = `'1x9r1xo4X4wcCtNy1Crd7zc8bJm-6UC6X` — **con una comilla simple
+#    delante**, la que Sheets usa para forzar texto. La URL de al lado, en la misma fila, lleva
+#    el id **sin** la comilla, así que no hay duda de cuál es el bueno.
+#    ⚠️ Lo que hace: la carpeta **parece existir** (la celda no está vacía), así que `publicar`
+#       no crea ninguna y después intenta archivar el fichero en un id que **Drive no conoce**.
+#       El fallo llega de Drive, tarde, y con el expediente a medias.
+_CABID = ["request_id", "drive_folder_id", "drive_primary_file_id"]
+_BUENO = ["SOL-1", "1x9r1xo4X4wcCtNy1Crd7zc8bJm-6UC6X", "1Qgoq3pIdGa29hYzgybJs8Cw0l95-_oCQ"]
+_MALO = ["SOL-2", "'1x9r1xo4X4wcCtNy1Crd7zc8bJm-6UC6X", ""]
+
+ok(H.ids_raros(H.a_registros([_CABID, _BUENO])[0]) == [],
+   u"una fila con los ids bien no debería dar avisos")
+_a = H.ids_raros(H.a_registros([_CABID, _BUENO, _MALO])[0])
+ok(len(_a) == 1, u"⛔ no caza el id con la comilla delante: %r" % (_a,))
+ok(_a and _a[0][:3] == (3, "SOL-2", "drive_folder_id"),
+   u"el aviso no dice fila, expediente y columna: %r" % (_a,))
+ok(_a and "'" in _a[0][3], u"el aviso no enseña el valor, que es donde se ve la comilla: %r" % (_a,))
+
+# ⚠️ El vacío no es síntoma: la mayoría de las filas tienen estas columnas en blanco.
+ok(H.ids_raros(H.a_registros([_CABID, ["SOL-3", "", ""]])[0]) == [],
+   u"⛔ canta por columnas vacías")
+# Un id corto también es raro: los de Drive pasan de 20 caracteres.
+ok(len(H.ids_raros([{"request_id": "x", "drive_folder_id": "abc"}])) == 1,
+   u"un id de tres letras debería cantarse")
+# Y uno con un espacio dentro, o con una URL entera metida en la celda.
+for _malo in (u"1x9r 1xo4X4wcCtNy1Crd7zc8bJm", u"https://drive.google.com/drive/folders/1x9r1xo",
+              u"1x9r1xo4X4wcCtNy1Crd7zc8bJmñ"):
+    ok(len(H.ids_raros([{"request_id": "x", "drive_folder_id": _malo}])) == 1,
+       u"no caza el id %r" % (_malo,))
+# ⚠️ Un id de Google Docs (44 caracteres) SÍ vale: el resumen de cuatro filas reales es un
+#    documento, no un fichero, y ponerlos rojos sería cantar sobre trabajo bien hecho.
+ok(H.ids_raros([{"request_id": "x",
+                 "drive_summary_file_id": "1WqqfgqJt0xhUGbZkizIF7_Q4yTPQdbQhbr9VdYfrdhs"}]) == [],
+   u"⛔ un id de Google Docs de 44 caracteres debería valer: hay cuatro reales")
+ok(H.ids_raros([]) == [] and H.ids_raros(None) == [], u"entradas vacías no revientan")
+ok(H.ids_raros(["chusta"]) == [], u"lo que no es un registro se salta")
+ok("drive_folder_id" in H.COLUMNAS_ID and "notion_page_id" not in H.COLUMNAS_ID,
+   u"⚠️ un id de Notion lleva guiones y no es de Drive: meterlo aquí pondría roja media hoja")
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

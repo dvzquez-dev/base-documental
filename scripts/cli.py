@@ -102,6 +102,13 @@ def revisar_datos(valores_solicitudes, filas_libro):
 
     # ⛔ Las filas DESPLAZADAS van primero: si la cola de una fila está corrida, todo lo que
     #    se diga de ella después se ha leído de la columna equivocada.
+    # ⛔ Y los ids con basura dentro, que es peor que un hueco: una carpeta con una comilla
+    #    delante **parece existir**, así que no se crea ninguna y el fichero se archiva en un id
+    #    que Drive no conoce.
+    for nf, rid, col, valor in H.ids_raros(registros):
+        lineas.append(u"ID        fila %d %s — `%s` vale %r y no tiene forma de id de Drive: "
+                      u"parece existir y Drive no lo conoce" % (nf, rid, col, valor))
+
     for nf, rid, col, valor in H.desplazadas(registros):
         lineas.append(u"COLUMNA   fila %d %s — `%s` debería ser un número y vale %r: la fila "
                       u"parece desplazada respecto a la cabecera" % (nf, rid, col, valor))
