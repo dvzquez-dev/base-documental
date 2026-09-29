@@ -40,6 +40,13 @@ on:
         description: "Sólo repasar los datos y listar lo que no cuadra"
         type: boolean
         default: false
+      ingerir:
+        # ⛔ El paso 1. Va aparte de la pasada porque escribe en OTRO sitio — añade filas a
+        #    `SOLICITUDES` — y porque lo primero que hay que mirar es qué entraría, no qué se
+        #    publicaría. Con `aplicar` en falso sólo dice lo que añadiría.
+        description: "Ingerir las respuestas nuevas del formulario (paso 1)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -103,7 +110,10 @@ jobs:
         run: |
           set -e
           ARGS=""
-          if [ "${{ inputs.revisar }}" = "true" ]; then
+          if [ "${{ inputs.ingerir }}" = "true" ]; then
+            ARGS="--ingerir"
+            if [ "${{ inputs.aplicar }}" = "true" ]; then ARGS="$ARGS --aplicar"; fi
+          elif [ "${{ inputs.revisar }}" = "true" ]; then
             ARGS="--revisar"
           else
             if [ "${{ inputs.aplicar }}" = "true" ]; then ARGS="--aplicar"; fi
