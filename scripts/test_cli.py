@@ -222,6 +222,71 @@ _l, _ = CLI.revisar_datos(
 ok(not [l for l in _l if l.startswith("ANEXOS")],
    u"⛔ canta sobre unos anexos en regla que venían por comas: %r" % (_l,))
 
+# ── EL WORKFLOW TIENE QUE PASAR TODO LO QUE EL CÓDIGO LEE ──────────
+# ⛔⛔ Medido el 29/09: el código que corre la pasada lee **cuatro** variables de entorno y el
+#    workflow declaraba **tres**. La que faltaba era `DOMINIO_EQUIPO`, o sea que la primera
+#    publicación de verdad se habría parado en seco — con todos los secretos puestos y sin que
+#    nada en el repo lo dijera. Las dos mitades del contrato viven en ficheros distintos y en
+#    lenguajes distintos, que es justo donde nadie mira.
+# ⚠️ Se descubren **los módulos que el propio `cli.py` alcanza**, con `ast`: escribir la lista
+#    a mano es escribir la tercera copia del contrato.
+import ast as _ast
+import io as _io
+import re
+
+_AQUI = os.path.dirname(os.path.abspath(__file__))
+
+
+def _lee_entorno(mod, vistos):
+    """Las variables de entorno que lee `mod` y todo lo que importa, transitivamente."""
+    if mod in vistos:
+        return set()
+    vistos.add(mod)
+    ruta = os.path.join(_AQUI, mod + ".py")
+    if not os.path.exists(ruta):
+        return set()
+    arbol = _ast.parse(_io.open(ruta, encoding="utf-8").read())
+    fuera = set()
+    for nodo in _ast.walk(arbol):
+        if isinstance(nodo, _ast.Import):
+            for a_ in nodo.names:
+                fuera |= _lee_entorno(a_.name, vistos)
+        elif isinstance(nodo, _ast.ImportFrom) and nodo.module:
+            fuera |= _lee_entorno(nodo.module, vistos)
+        elif isinstance(nodo, _ast.Call):
+            f = nodo.func
+            if (isinstance(f, _ast.Attribute) and f.attr == "get"
+                    and isinstance(f.value, _ast.Attribute) and f.value.attr == "environ"
+                    and nodo.args and isinstance(nodo.args[0], _ast.Constant)):
+                fuera.add(nodo.args[0].value)
+        elif (isinstance(nodo, _ast.Subscript) and isinstance(nodo.value, _ast.Attribute)
+              and nodo.value.attr == "environ" and isinstance(nodo.slice, _ast.Constant)):
+            fuera.add(nodo.slice.value)
+    return fuera
+
+
+_PEDIDAS = set(v for v in _lee_entorno("cli", set()) if isinstance(v, str) and v.isupper())
+_YML = os.path.join(os.path.dirname(_AQUI), ".github", "workflows", "pipeline.yml")
+_TXT = _io.open(_YML, encoding="utf-8").read() if os.path.exists(_YML) else ""
+
+# ⛔⛔ Se leen las DECLARACIONES, no el texto del fichero. Con un `in _TXT` la comprobación
+#    salió **CIEGA**: el comentario que yo mismo escribí al añadir `DOMINIO_EQUIPO` nombra la
+#    variable, así que borrar la línea que la pasa **no cambiaba nada**. Es la trampa de «el
+#    comando que re-mide cuenta la prosa del arreglo», y aquí la escribí yo.
+_DECLARADAS = set(re.findall(r"(?m)^\s*([A-Z][A-Z0-9_]+):\s*\$\{\{", _TXT))
+
+ok(_TXT, u"no se encuentra `.github/workflows/pipeline.yml`: el contrato no se puede mirar")
+ok("DOMINIO_EQUIPO" in _PEDIDAS,
+   u"⚠️ el descubridor no ve `DOMINIO_EQUIPO`: mide mal y diría que todo cuadra")
+ok(len(_PEDIDAS) >= 4, u"el descubridor ve muy poco (%d): %r" % (len(_PEDIDAS), sorted(_PEDIDAS)))
+ok(len(_DECLARADAS) >= 4,
+   u"⚠️ el lector del workflow ve %d declaraciones: si viera 0, todo saldría «falta» y el "
+   u"caso sería inútil al revés" % len(_DECLARADAS))
+_faltan = sorted(v for v in _PEDIDAS if v not in _DECLARADAS)
+ok(_faltan == [],
+   u"⛔ el workflow no pasa %r: la pasada se pararía con los secretos puestos y sin que nada "
+   u"en el repo lo dijera" % (_faltan,))
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

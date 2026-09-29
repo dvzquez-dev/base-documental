@@ -77,6 +77,17 @@ jobs:
           GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+          # ⛔ `DOMINIO_EQUIPO` no es un secreto, pero SIN ELLA la publicación se para en
+          #    seco: `permiso_dominio` se niega a compartir con "", que no comparte con
+          #    nadie. Faltaba, y el fallo habría sido «falta la variable» con todos los
+          #    secretos puestos. Lo ata un caso de `test_cli.py` que descubre por `ast`
+          #    lo que el código lee y lo busca en este fichero.
+          #    ⛔⛔ Y **sin valor por defecto a propósito**. Compartir un documento con un
+          #       dominio es una acción hacia fuera, y el dominio del equipo es una
+          #       decisión de Daniel, no una que se deduzca de los correos que se ven en
+          #       la hoja. Sin la variable, la pasada se para diciendo cuál falta — que es
+          #       barato— en vez de compartir con un dominio que eligió un script.
+          DOMINIO_EQUIPO: ${{ vars.DOMINIO_EQUIPO }}
         run: |
           set -e
           ARGS=""
