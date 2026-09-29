@@ -18,6 +18,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # No se instalan las librerías de Google a propósito: el banco las dobla, así que
-      # comprueba funciones puras sin credenciales ni red.
-      - run: python scripts/test_referencias_y_senales.py
+      # No se instalan las librerías de Google a propósito: los bancos las doblan, así que
+      # comprueban funciones puras sin credenciales ni red.
+      #
+      # ⛔ Los bancos se DESCUBREN, no se listan. Cuando esto llevaba un solo `- run` cableado,
+      # añadir un banco nuevo no lo ponía a correr, y un banco que nadie corre se pudre igual que
+      # el código que vigila. La misma forma que la lista de tipos cableada que mandaba cada acta
+      # a intervención manual: si algo se puede leer, no se copia.
+      - name: Todos los bancos de scripts/
+        run: |
+          set -e
+          n=0
+          for b in scripts/test_*.py; do
+            echo "=== $b"
+            PYTHONDONTWRITEBYTECODE=1 python -B "$b"
+            n=$((n+1))
+          done
+          echo "=== $n bancos corridos"
+          test "$n" -gt 0
