@@ -82,6 +82,12 @@ def cambios_de(resultado, fila, ahora=None):
         return {}
 
     cambios = dict((b, "TRUE") for b in resultado.banderas)
+    # ⛔ Y lo que el servicio devolvió, que es la PRUEBA de que se hizo. Sin escribirlo,
+    #    `evidencias` no puede anotar lo ya hecho y la pasada siguiente **repite el trabajo**
+    #    — una segunda página de Notion del mismo documento.
+    for _k, _v in sorted(getattr(resultado, "extra", {}).items()):
+        if str(_v).strip():
+            cambios[_k] = _v
     if ahora:
         cambios[COL_ACTUALIZADO] = ahora
     # ⛔ Al salir bien se LIMPIA el error anterior. Si no, una fila que falló el martes y funcionó

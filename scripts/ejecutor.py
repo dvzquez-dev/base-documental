@@ -65,7 +65,7 @@ class Resultado(object):
     """Lo que pasó con una fila. Se lee sin saber nada del módulo."""
 
     def __init__(self, n, request_id, accion, porque, hecho=False, seco=False,
-                 banderas=(), error=None):
+                 banderas=(), error=None, extra=None):
         self.n = n
         self.request_id = request_id
         self.accion = accion
@@ -74,6 +74,11 @@ class Resultado(object):
         self.seco = seco
         self.banderas = tuple(banderas)
         self.error = error
+        # ⛔ Lo que el servicio DEVUELVE y hay que anotar: `notion_page_id`,
+        #    `base_database_row`… No es información de adorno: es la PRUEBA de que el
+        #    trabajo se hizo, y sin ella `evidencias` no puede impedir que la pasada
+        #    siguiente cree una SEGUNDA página de Notion.
+        self.extra = dict(extra or {})
 
     def __repr__(self):  # pragma: no cover
         estado = "error" if self.error else ("hecho" if self.hecho else
@@ -124,12 +129,13 @@ def ejecutar_una(fila, servicios, n=0, aplicar=False):
         return Resultado(n, rid, accion, porque, seco=True, banderas=banderas)
 
     try:
-        fn(fila)
+        _devuelto = fn(fila)
     except Exception as e:
         return Resultado(n, rid, accion, porque,
                          error=u"%s: %s" % (type(e).__name__, e))
 
-    return Resultado(n, rid, accion, porque, hecho=True, banderas=banderas)
+    return Resultado(n, rid, accion, porque, hecho=True, banderas=banderas,
+                     extra=_devuelto if isinstance(_devuelto, dict) else None)
 
 
 def pasada(filas, servicios, aplicar=False):

@@ -250,6 +250,25 @@ ok(P.siguiente is _orig_siguiente, "el monkeypatch no se deshizo")
 ok(E.ejecutar_una(POR_CERRAR, Doble()).accion == P.CERRAR,
    "tras deshacer el parcheo, `siguiente` no vuelve a funcionar")
 
+# ── Lo que el servicio DEVUELVE llega al Resultado ──────────────────────────────
+# ⛔ Es la PRUEBA de que el trabajo se hizo (`notion_page_id`). Sin ella, `evidencias` no puede
+#    anotar lo ya hecho y la pasada siguiente crea una SEGUNDA página del mismo documento.
+class ConProsa(Doble):
+    def publicar(self, f):
+        self._mete("publicar", f)
+        return {"notion_page_id": "1a2b3c", "notion_page_url": "https://n/x"}
+
+
+_d = ConProsa()
+_r = E.ejecutar_una(POR_PUBLICAR, _d, aplicar=True)
+ok(_r.extra == {"notion_page_id": "1a2b3c", "notion_page_url": "https://n/x"},
+   "lo que devuelve el servicio no llega al Resultado: %r" % (_r.extra,))
+ok(_r.hecho is True, "sigue dándose por hecha")
+# Un servicio que no devuelve nada no rompe: `extra` queda vacío.
+ok(E.ejecutar_una(POR_CERRAR, Doble(), aplicar=True).extra == {},
+   "un servicio que devuelve None debería dejar `extra` vacío")
+ok(E.ejecutar_una(POR_CERRAR, Doble()).extra == {}, "en seco tampoco hay extra")
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

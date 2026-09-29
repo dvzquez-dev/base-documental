@@ -152,4 +152,15 @@ def correr(argv, servicios, ahora=None):
 
 
 if __name__ == "__main__":  # pragma: no cover
-    print(USO)
+    # ⛔ AQUÍ SE CONSTRUYEN LAS MANOS, Y SÓLO AQUÍ. Todo lo de arriba recibe `servicios` por
+    #    parámetro para poder probarse con dobles; el único sitio que instancia las de verdad es
+    #    este `__main__`, o sea cuando una persona (o la acción) lanza el script a propósito.
+    #    Importar `servicios` arriba haría que **cargar el módulo** arrastrara las librerías de
+    #    Google, y el banco dejaría de correr sin credenciales.
+    import servicios as _SRV                                            # noqa: PLC0415
+    from datetime import datetime, timezone                             # noqa: PLC0415
+
+    _ahora = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    _texto, _codigo = correr(sys.argv[1:], _SRV.Servicios(), ahora=_ahora)
+    print(_SRV.sin_secretos(_texto))
+    sys.exit(_codigo)

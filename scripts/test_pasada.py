@@ -264,6 +264,27 @@ ok("escritas" in txt and "se escribirían" not in txt,
 ok("PASADA APLICADA" not in txt_seco, "el informe en seco se lee como aplicado")
 ok(txt_seco != txt, "el informe seco y el aplicado son el mismo texto")
 
+# ── La PRUEBA que devuelve el servicio se escribe en su columna ───────────────────
+# ⛔ Sin esto el `notion_page_id` se queda en memoria: `evidencias` nunca lo ve y la pasada
+#    siguiente vuelve a publicar. La capacidad estaría escrita entera y muerta en el cable.
+class ConId(Doble):
+    def publicar(self, f):
+        self._m("publicar")
+        return {"notion_page_id": "1a2b3c"}
+
+
+CAB_ID = CAB + ["notion_page_id"]
+_pub = fila(PUB[:8] + [F] * 8 + [T, T, F]) + [""]
+d = ConId()
+_rs, celdas, _av = PA.correr([CAB_ID, _pub], d, aplicar=True, ahora=AHORA)
+_col = PA.H.letra_columna(CAB_ID.index("notion_page_id") + 1)
+ok(dict(celdas).get("%s2" % _col) == "1a2b3c",
+   "el id que devolvió Notion no se escribe en su columna: %r" % (celdas,))
+# Y en seco también se ve lo que se escribiría, sin escribirlo.
+d = ConId()
+_rs, celdas, _av = PA.correr([CAB_ID, _pub], d, ahora=AHORA)
+ok("escribir" not in d.llamadas, "¡la pasada seca escribió!")
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))
