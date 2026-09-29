@@ -1,0 +1,89 @@
+# El pipeline documental, corriendo solo.
+#
+# ⛔ SECO POR DEFECTO, Y NO ES PRUDENCIA DECORATIVA. `SOLICITUDES` es la hoja de un pipeline en
+#    marcha y NO TIENE DESHACER: si una pasada escribe mal cuarenta filas, se arreglan a mano una
+#    por una. Una tarea programada que escribe en producción sin que nadie mire es exactamente lo
+#    que no se debe montar, así que:
+#
+#      · la pasada automática va SIN `--aplicar`: dice qué haría y qué celdas escribiría;
+#      · aplicar es una decisión de una persona, con `workflow_dispatch` y el interruptor puesto.
+#
+# ⚠️ Y `--limite` está ahí para que la primera pasada de verdad toque TRES expedientes, se miren,
+#    y sólo después se suelte entera. Sin tope, un error de criterio se multiplica por toda la cola.
+#
+# ⬜ PENDIENTE DE DANIEL — el `schedule` está SIN poner a propósito.
+#    Hace falta antes: `GOOGLE_CREDENTIALS` y `NOTION_TOKEN` como secretos del repositorio.
+#    Sin ellos la tarea fallaría en cada vuelta, y una acción que sale roja cada hora se acaba
+#    ignorando — con lo que el día que el rojo signifique algo, tampoco lo mirará nadie.
+#    Cuando estén, se añade aquí:
+#
+#      schedule:
+#        - cron: "*/30 * * * *"
+#
+name: pipeline documental
+
+on:
+  workflow_dispatch:
+    inputs:
+      aplicar:
+        description: "Escribir de verdad en la hoja (sin esto, pasada seca)"
+        type: boolean
+        default: false
+      limite:
+        description: "Máximo de expedientes a tocar (vacío = todos)"
+        type: string
+        default: "3"
+      revisar:
+        description: "Sólo repasar los datos y listar lo que no cuadra"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  pasada:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Bancos
+        # ⛔ Antes de tocar nada, el árbol entero. Son puros y offline: cuestan segundos, y correr
+        #    el pipeline con un banco rojo es escribir en producción con algo que ya sabemos roto.
+        run: |
+          set -e
+          n=0
+          for b in scripts/test_*.py; do
+            PYTHONDONTWRITEBYTECODE=1 python -B "$b"
+            n=$((n+1))
+          done
+          echo "$n bancos verdes"
+          test "$n" -gt 0
+
+      - name: Pasada
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: |
+          set -e
+          ARGS=""
+          if [ "${{ inputs.revisar }}" = "true" ]; then
+            ARGS="--revisar"
+          else
+            if [ "${{ inputs.aplicar }}" = "true" ]; then ARGS="--aplicar"; fi
+            if [ -n "${{ inputs.limite }}" ]; then ARGS="$ARGS --limite ${{ inputs.limite }}"; fi
+          fi
+          echo "argumentos: ${ARGS:-(pasada seca, sin tope)}"
+          python scripts/cli.py $ARGS | tee salida.txt
+
+      - name: Informe a la vista
+        if: always()
+        # El informe va al resumen de la ejecución: lo que hay que leer no debería estar enterrado
+        # en un desplegable de registros que nadie abre.
+        run: |
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat salida.txt >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "(sin salida)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
