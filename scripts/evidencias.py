@@ -52,10 +52,18 @@ import cierre as C
 #    cabecera, iterar el diccionario y iterar `BANDERAS` daban lo mismo y la garantía de orden era
 #    **inobservable**: su mutación salía ciega. Así se puede comprobar, y añadir una entrada en
 #    cualquier sitio deja de cambiar lo que se enseña.
+# ⛔⛔ DOS SE CAYERON DE AQUÍ EL 29/09 (697.ª), Y NO POR GUSTO.
+#    El código de Cowork que vive en este mismo repo lo dice literal:
+#      «no toca `drive_folder_created`: esa la decide `05_publicar_aprobado` **cuando el resto
+#       de la publicación esté completa**»  (`fix_docx_publication_date.py`)
+#    O sea que `drive_folder_id` prueba que **la carpeta existe**, NO lo que la bandera afirma.
+#    Anotarla al ver el id marcaría como publicado un expediente al que le falta todo lo demás.
+#    ⚠️ Y `drive_primary_file_verified` se cae por lo mismo, leyendo su propio nombre: el id
+#    prueba que el fichero **está**, no que se haya **verificado**. «Existe» y «comprobado» no
+#    son la misma afirmación, y aquí la diferencia es justo lo que se estaba regalando.
+#    ✅ Se quedan las tres cuyo identificador SÍ prueba lo que la bandera dice.
 PRUEBA_DE = {
     "base_database_registered": "base_database_row",
-    "drive_folder_created": "drive_folder_id",
-    "drive_primary_file_verified": "drive_primary_file_id",
     "drive_summary_created": "drive_summary_file_id",
     "notion_page_created": "notion_page_id",
 }

@@ -40,12 +40,21 @@ def fila(**kw):
 
 
 # ── 1. El mapa, contra la cabecera medida ──────────────────────────────────────────────────
+# ⛔ TRES, no cinco. `drive_folder_created` y `drive_primary_file_verified` se cayeron el
+#    697.ª: el código de Cowork dice que la primera la decide el paso final «cuando el resto de
+#    la publicación esté completa», y la segunda afirma «verificado» cuando el id sólo prueba
+#    «existe». Anotarlas al ver el id marcaría como publicado lo que no lo está.
 ok(EV.PRUEBA_DE == {"notion_page_created": "notion_page_id",
-                    "drive_folder_created": "drive_folder_id",
-                    "drive_primary_file_verified": "drive_primary_file_id",
                     "drive_summary_created": "drive_summary_file_id",
                     "base_database_registered": "base_database_row"},
-   "PRUEBA_DE ya no es el mapa medido de la cabecera")
+   "PRUEBA_DE ya no es el mapa medido")
+ok("drive_folder_created" not in EV.PRUEBA_DE,
+   "⛔ `drive_folder_created` NO se anota por tener carpeta: su bandera significa que la "
+   "publicación entera está completa")
+ok("drive_primary_file_verified" not in EV.PRUEBA_DE,
+   "⛔ …ni `drive_primary_file_verified` por tener el fichero: «existe» no es «verificado»")
+ok(EV.ya_hecho(fila(drive_folder_id="abc")) == [],
+   "⛔ tener la carpeta NO basta para anotar que la publicación está hecha")
 # ⛔ Cada bandera del mapa tiene que existir de verdad, o se estaría mirando un nombre que nadie
 #    escribe y la protección no saltaría nunca.
 for bandera in sorted(EV.PRUEBA_DE):
@@ -59,8 +68,6 @@ for bandera in sorted(EV.PRUEBA_DE):
 # ── 2. Con prueba se anota ─────────────────────────────────────────────────────────────────
 ok(EV.ya_hecho(fila(notion_page_id="1a2b3c")) == ["notion_page_created"],
    "no ve que la página ya existe: %r" % EV.ya_hecho(fila(notion_page_id="1a2b3c")))
-ok(EV.ya_hecho(fila(drive_folder_id="abc")) == ["drive_folder_created"],
-   "no ve que la carpeta de Drive ya existe")
 ok(EV.ya_hecho(fila(base_database_row="14")) == ["base_database_registered"],
    "no ve que la fila del Libro ya está escrita")
 ok(EV.ya_hecho(fila(base_database_row=14)) == ["base_database_registered"],
@@ -77,11 +84,11 @@ ok(EV.hay_prueba(None) is False and EV.hay_prueba("") is False and EV.hay_prueba
    "vacío y None no son prueba")
 
 # Varias a la vez, y en el orden de la cabecera (no en el que Python itere el diccionario).
-d = fila(notion_page_id="p", drive_folder_id="d", base_database_row="14")
+d = fila(notion_page_id="p", drive_summary_file_id="s", base_database_row="14")
 # ⛔ El orden es el de la CABECERA, no el del diccionario — que está escrito en alfabético justo
 #    para que esto se pueda comprobar. Con los dos órdenes iguales, la garantía era inobservable y
 #    su mutación salía ciega.
-ok(EV.ya_hecho(d) == ["notion_page_created", "drive_folder_created", "base_database_registered"],
+ok(EV.ya_hecho(d) == ["notion_page_created", "drive_summary_created", "base_database_registered"],
    "no salen en el orden de la cabecera: %r" % EV.ya_hecho(d))
 ok(list(EV.PRUEBA_DE) != [b for b in C.BANDERAS if b in EV.PRUEBA_DE],
    "el diccionario está en el orden de la cabecera: así la garantía de orden no se puede medir")
