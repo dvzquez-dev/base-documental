@@ -85,8 +85,12 @@ ok("no hace nadie" in por, "el por qué no dice que es algo sin implementar: %r"
 ok(any(b in por for b in P.SIN_IMPLEMENTAR),
    "el por qué no dice QUÉ falta, y sin eso no es accionable: %r" % por)
 ok(a != P.PUBLICAR, "¡republica y crearía una segunda página!")
-ok(len(P.SIN_IMPLEMENTAR) == 4, "las banderas sin implementar deberían ser 4: %d"
+ok(len(P.SIN_IMPLEMENTAR) == 2, "las banderas sin implementar deberían ser 2: %d"
    % len(P.SIN_IMPLEMENTAR))
+ok("drive_primary_file_verified" not in P.SIN_IMPLEMENTAR,
+   "⛔ archivar y VERIFICAR el fichero ya se hace: se relee la carpeta")
+ok("domain_permission_verified" not in P.SIN_IMPLEMENTAR,
+   "⛔ …y compartir con el dominio también, releyendo el permiso")
 ok("notion_pdf_embedded" not in P.SIN_IMPLEMENTAR,
    "⛔ subir el fichero YA está implementado: dejarlo aquí pararía expedientes que se pueden "
    "terminar")

@@ -317,6 +317,11 @@ class Servicios(object):
         _carpeta = extra.get("drive_folder_id") or str(fila.get("drive_folder_id") or "").strip()
         if str(fila.get("source_drive_file_id") or "").strip() and _carpeta:
             extra.update(self.mover_a_carpeta(fila, _carpeta))
+            # ⛔ Y se RELEE que esté dentro: `update` puede contestar bien y dejarlo donde estaba.
+            if not self.verificar_en_carpeta(extra.get("drive_primary_file_id"), _carpeta):
+                raise SystemExit("el fichero no consta en la carpeta del expediente tras "
+                                 "moverlo: no se da por archivado")
+            self.permiso_dominio(extra.get("drive_primary_file_id"))
 
         extra["notion_page_id"] = pid
         extra["notion_page_url"] = str(r.get("url") or "")
@@ -404,6 +409,42 @@ class Servicios(object):
         self.drive.files().update(fileId=fid, addParents=destino, removeParents=padres,
                                   fields="id,parents", supportsAllDrives=True).execute()
         return {"drive_primary_file_id": fid}
+
+    def verificar_en_carpeta(self, fichero_id, carpeta_id):
+        """¿El fichero está **de verdad** dentro de esa carpeta? Se relee de Drive.
+
+        ⛔ Mover no es verificar, igual que subir no era embeber. Y en este proyecto está medido
+        que una escritura puede no hacer nada y decir que sí: `update` puede contestar bien y
+        dejar el fichero donde estaba.
+        """
+        fid, cid = str(fichero_id or "").strip(), str(carpeta_id or "").strip()
+        if not (fid and cid):
+            return False
+        meta = self.drive.files().get(fileId=fid, fields="parents",
+                                      supportsAllDrives=True).execute() or {}
+        return cid in (meta.get("parents") or [])
+
+    def permiso_dominio(self, fichero_id, dominio=None):
+        """Comparte el fichero con el dominio del equipo y **relee** que el permiso está.
+
+        ⚠️ El dominio sale del entorno: cablearlo aquí lo dejaría escrito en un repo que se
+        publica, y cambiarlo obligaría a tocar código.
+        """
+        fid = str(fichero_id or "").strip()
+        dom = str(dominio or os.environ.get("DOMINIO_EQUIPO", "")).strip()
+        if not (fid and dom):
+            raise SystemExit("no se comparte: falta el fichero (%r) o `DOMINIO_EQUIPO` (%r)"
+                             % (fid, dom))
+        self.drive.permissions().create(
+            fileId=fid, supportsAllDrives=True, sendNotificationEmail=False,
+            body={"type": "domain", "role": "reader", "domain": dom}).execute()
+        r = self.drive.permissions().list(fileId=fid, fields="permissions(type,domain,role)",
+                                          supportsAllDrives=True).execute() or {}
+        for pm in (r.get("permissions") or []):
+            if pm.get("type") == "domain" and pm.get("domain") == dom:
+                return True
+        raise SystemExit("el permiso de dominio no consta tras crearlo: el equipo no podría "
+                         "abrir el documento y la página diría que sí")
 
     def registrar(self, fila):
         """Paso 6: añade la fila al Libro de Datos y devuelve dónde quedó."""

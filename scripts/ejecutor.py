@@ -52,7 +52,8 @@ ATIENDE = {
     #    ⚠️ Prometer de menos hace que el expediente se quede abierto y a la vista. Prometer de
     #    más lo entierra. No son simétricos.
     P.PUBLICAR: ("publicar", ("notion_page_created", "notion_pdf_embedded",
-                              "notion_embedding_verified")),
+                              "notion_embedding_verified", "drive_primary_file_verified",
+                              "domain_permission_verified")),
     P.REGISTRAR: ("registrar", ("base_database_registered",)),
     P.CERRAR: ("cerrar", ("closed",)),
 }

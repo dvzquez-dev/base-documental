@@ -67,9 +67,10 @@ CON_MODELO = (ANALIZAR,)
 # ⚠️ `drive_primary_file_verified` SIGUE AQUÍ aunque el fichero ya se archive: mover no es
 #    verificar, igual que subir no era embeber. Verificarlo es releer la carpeta y comprobar
 #    que está dentro, y eso aún no se hace.
-SIN_IMPLEMENTAR = ("drive_folder_created",
-                   "drive_primary_file_verified", "drive_summary_created",
-                   "domain_permission_verified")
+# ✅ Quedan DOS: el resumen ejecutivo como fichero aparte, y `drive_folder_created`, que su
+#    propio código define como «la publicación entera está completa» — o sea que es la ÚLTIMA
+#    en ponerse, no una tarea. Se quedará aquí hasta que el resumen exista.
+SIN_IMPLEMENTAR = ("drive_folder_created", "drive_summary_created")
 
 
 def siguiente(fila):

@@ -187,12 +187,30 @@ class _Files(object):
 
     def update(self, **kw):
         self.diario.append(("update", kw))
+        # ⚠️ El doble MUEVE de verdad: tras el update, `get` devuelve el padre nuevo. Un doble
+        #    que no cambiara de estado dejaría la verificación roja sobre código correcto.
+        self.meta = dict(self.meta, parents=[kw.get("addParents")])
         return _Ejec({"id": kw.get("fileId"), "parents": [kw.get("addParents")]})
 
 
+class _Permisos(object):
+    def __init__(self, diario, dominio="uvigo.es"):
+        self.diario, self.dominio = diario, dominio
+
+    def create(self, **kw):
+        self.diario.append(("perm_create", kw))
+        return _Ejec({"id": "perm-1"})
+
+    def list(self, **kw):
+        self.diario.append(("perm_list", kw))
+        return _Ejec({"permissions": [{"type": "domain", "role": "reader",
+                                       "domain": self.dominio}]})
+
+
 class Drive(object):
-    def __init__(self, resp=None, meta=None, datos=b"PDFDATA"):
+    def __init__(self, resp=None, meta=None, datos=b"PDFDATA", dominio="uvigo.es"):
         self.diario = []
+        self._p = _Permisos(self.diario, dominio)
         self._f = _Files(self.diario, resp if resp is not None else {"id": "F-nueva"})
         self._f.meta = meta if meta is not None else {"name": "doc.pdf", "size": "1024",
                                                       "parents": ["F-bandeja"]}
@@ -200,6 +218,9 @@ class Drive(object):
 
     def files(self):
         return self._f
+
+    def permissions(self):
+        return self._p
 _pedidos = []
 
 
@@ -513,6 +534,75 @@ dr = Drive()
 S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
             drive=dr, subir=_subir_ok, notion_get=_leer_bloques_ok).publicar(FILA)
 ok("update" not in [a for a, _ in dr.diario], "mueve algo sin haber fichero de origen")
+
+# ── Mover no es verificar, y compartir se relee ───────────────────────────────
+os.environ["DOMINIO_EQUIPO"] = "uvigo.es"
+_dr = Drive(meta={"name": "d.pdf", "size": "10", "parents": ["F-buena"]})
+ok(S.Servicios(drive=_dr).verificar_en_carpeta("D-1", "F-buena") is True,
+   "no ve el fichero que SÍ está en la carpeta")
+ok(S.Servicios(drive=_dr).verificar_en_carpeta("D-1", "F-otra") is False,
+   "⛔ da por archivado un fichero que está en OTRA carpeta")
+ok(S.Servicios(drive=_dr).verificar_en_carpeta("", "F-buena") is False, "sin fichero no verifica")
+
+# ⛔ Si tras mover no consta en la carpeta, no se da por archivado.
+class _NoMueve(Drive):
+    def __init__(self):
+        Drive.__init__(self, meta={"name": "d.pdf", "size": "10", "parents": ["F-bandeja"]})
+
+    def files(self):
+        _f = Drive.files(self)
+        _f.update = lambda **kw: (self.diario.append(("update", kw)) or _Ejec({}))
+        return _f
+
+try:
+    S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
+                drive=_NoMueve(), subir=_subir_ok,
+                notion_get=_leer_bloques_ok).publicar(_CON_FICHERO)
+    _paro = False
+except SystemExit as e:
+    _paro = "carpeta" in str(e)
+ok(_paro, "⛔ el fichero no se movió y se dio por archivado")
+
+# ⛔ Y `publicar` lo comparte: sin el permiso, el documento queda archivado y **nadie del
+#    equipo puede abrirlo**, con la página de Notion diciendo que está publicado. Sin este
+#    caso la llamada salía CIEGA — se probaba el método suelto, no que `publicar` lo use.
+_dr = Drive()
+S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
+            drive=_dr, subir=_subir_ok, notion_get=_leer_bloques_ok).publicar(_CON_FICHERO)
+ok("perm_create" in [a for a, _ in _dr.diario],
+   u"⛔ publica sin compartir: el equipo no podría abrir el documento")
+
+# ── El permiso de dominio se CREA y se RELEE ───────────────────────────────
+_dr = Drive()
+ok(S.Servicios(drive=_dr).permiso_dominio("D-1") is True, "no comparte con el dominio")
+_pc = [k for a, k in _dr.diario if a == "perm_create"][0]
+ok(_pc["body"] == {"type": "domain", "role": "reader", "domain": "uvigo.es"},
+   "el permiso no es de lectura para el dominio: %r" % (_pc.get("body"),))
+ok(_pc.get("sendNotificationEmail") is False,
+   "⚠️ manda correo a todo el dominio por cada documento")
+ok("perm_list" in [a for a, _ in _dr.diario],
+   "⛔ no RELEE el permiso: crear no es comprobar")
+
+# ⛔ Si el permiso no consta tras crearlo, se dice: el equipo no podría abrir el documento.
+_dr = Drive(dominio="otro.es")
+try:
+    S.Servicios(drive=_dr).permiso_dominio("D-1")
+    _paro = False
+except SystemExit as e:
+    _paro = "no consta" in str(e)
+ok(_paro, "⛔ el permiso no quedó y se dio por bueno")
+
+# Sin dominio configurado se para: compartir con "" no comparte con nadie.
+_g = os.environ.pop("DOMINIO_EQUIPO", None)
+try:
+    S.Servicios(drive=Drive()).permiso_dominio("D-1")
+    _paro = False
+except SystemExit as e:
+    _paro = "DOMINIO_EQUIPO" in str(e)
+finally:
+    if _g is not None:
+        os.environ["DOMINIO_EQUIPO"] = _g
+ok(_paro, "⛔ sin `DOMINIO_EQUIPO` debería pararse diciendo cuál falta")
 
 print("%d comprobaciones" % hechas[0])
 if fallos:
