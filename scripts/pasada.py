@@ -39,6 +39,7 @@ for _f in (sys.stdout, sys.stderr):
 
 import ejecutor as E
 import hoja as H
+import verificar as VER
 
 
 COL_ACTUALIZADO = "updated_at"
@@ -135,6 +136,26 @@ def correr(valores, servicios, aplicar=False, ahora=None):
                 escribir(celdas)
             except Exception as e:
                 avisos.append(u"al escribir en la hoja: %s: %s" % (type(e).__name__, e))
+            else:
+                # ⛔ Y SE RELEE. En este proyecto está medido que el conector de Sheets puede
+                #    fallar **en silencio** — devolver vacío y no escribir —, y aquí eso es caro
+                #    de una forma concreta: la pasada marca el expediente como hecho y **no
+                #    vuelve a mirarlo nunca**. `flujos/historico.py` ya relee y contrasta por
+                #    esto mismo.
+                releer = getattr(servicios, "releer", None)
+                if not callable(releer):
+                    avisos.append(u"`servicios.releer` no existe: se ha escrito y NO se ha "
+                                  u"comprobado que quedara escrito, que es justo el fallo "
+                                  u"silencioso que ya ocurrió una vez")
+                else:
+                    try:
+                        leidas = releer([c for c, _v in celdas])
+                    except Exception as e:
+                        avisos.append(u"al releer lo escrito: %s: %s" % (type(e).__name__, e))
+                    else:
+                        cuadran, disc = VER.contrastar(celdas, leidas)
+                        if not cuadran:
+                            avisos.append(VER.informe(cuadran, disc, len(celdas)))
 
     return resultados, celdas, avisos
 

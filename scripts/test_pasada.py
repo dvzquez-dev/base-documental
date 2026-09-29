@@ -50,10 +50,11 @@ CAMBIOS = [T, T, T, T, T, F, F, T, F, F, F, F, F, F, F, F, F, F, F]
 
 
 class Doble(object):
-    def __init__(self, revienta=None):
+    def __init__(self, revienta=None, miente=False):
         self.llamadas = []
         self.escritas = None
         self.revienta = revienta
+        self.miente = miente
 
     def _m(self, n):
         self.llamadas.append(n)
@@ -75,6 +76,15 @@ class Doble(object):
     def escribir(self, celdas):
         self._m("escribir")
         self.escritas = list(celdas)
+
+    def releer(self, claves):
+        """⚠️ El doble RELEE, como el real. Un doble más pobre que el mundo no se nota hasta
+        que alguien mira el valor — y esta noche ya puso 4 pasadas buenas en rojo.
+        `self.miente` deja simular el fallo medido: la escritura dice que sí y no escribe."""
+        self._m("releer")
+        if self.miente:
+            return {}
+        return dict(self.escritas or [])
 
 
 # ── 1. En seco no se escribe NADA, pero SÍ se calcula qué se escribiría ────────────────────
@@ -127,6 +137,40 @@ for valores, que in ((CAMBIOS, "la de cambios pedidos"), (PUB, "la cerrada en re
     _rs, celdas, _av = PA.correr([CAB, fila(valores)], d, aplicar=True, ahora=AHORA)
     ok(celdas == [], "%s escribe algo y no debería: %r" % (que, celdas))
     ok("escribir" not in d.llamadas, "%s llama al escritor sin nada que escribir" % que)
+
+# ── 3b. Lo escrito se RELEE y se contrasta ───────────────────────────────────
+d = Doble()
+_rs, _c, avisos = PA.correr([CAB, fila(POR_CERRAR)], d, aplicar=True, ahora=AHORA)
+ok("releer" in d.llamadas, u"¡escribe y NO relee para comprobarlo! %r" % (d.llamadas,))
+ok(d.llamadas.index("escribir") < d.llamadas.index("releer"),
+   u"relee ANTES de escribir, que no comprueba nada: %r" % (d.llamadas,))
+ok(avisos == [], u"si lo escrito cuadra no debería haber avisos: %r" % (avisos,))
+
+# ⛔ EL FALLO MEDIDO EN ESTE PROYECTO: la escritura dice que sí y la celda sigue vacía.
+d = Doble(miente=True)
+_rs, _c, avisos = PA.correr([CAB, fila(POR_CERRAR)], d, aplicar=True, ahora=AHORA)
+ok(avisos, u"¡una escritura que no escribió pasa sin avisar!")
+ok(any("NO quedaron como se pidió" in a for a in avisos),
+   u"el aviso no dice que la hoja no refleja lo hecho: %r" % (avisos,))
+
+# Sin `releer` se dice: escribir sin comprobar es el agujero que esto viene a tapar.
+class SinReleer(object):
+    def cerrar(self, f):
+        pass
+
+    def escribir(self, celdas):
+        pass
+
+_rs, _c, avisos = PA.correr([CAB, fila(POR_CERRAR)], SinReleer(), aplicar=True, ahora=AHORA)
+ok(any("releer" in a for a in avisos), u"no avisa de que falta `releer`: %r" % (avisos,))
+ok(any("silencioso" in a for a in avisos),
+   u"el aviso no dice por qué importa: %r" % (avisos,))
+
+# ⚠️ Y en SECO no se relee: no hay nada escrito que comprobar.
+d = Doble()
+PA.correr([CAB, fila(POR_CERRAR)], d, ahora=AHORA)
+ok("releer" not in d.llamadas, u"relee en una pasada seca, donde no se escribió nada")
+
 
 # ── 4. El error se guarda EN LA FILA ───────────────────────────────────────────────────────
 d = Doble(revienta="cerrar")
