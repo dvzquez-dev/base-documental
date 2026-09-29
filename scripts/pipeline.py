@@ -64,6 +64,9 @@ CON_MODELO = (ANALIZAR,)
 # ✅ Y `notion_embedding_verified` salió también: `publicar` **relee la página** y comprueba
 #    que el bloque del fichero está dentro. Subir no era verificar — por eso hacía falta la
 #    relectura, no una promesa.
+# ⚠️ `drive_primary_file_verified` SIGUE AQUÍ aunque el fichero ya se archive: mover no es
+#    verificar, igual que subir no era embeber. Verificarlo es releer la carpeta y comprobar
+#    que está dentro, y eso aún no se hace.
 SIN_IMPLEMENTAR = ("drive_folder_created",
                    "drive_primary_file_verified", "drive_summary_created",
                    "domain_permission_verified")

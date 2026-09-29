@@ -312,6 +312,12 @@ class Servicios(object):
         if not pid:
             raise SystemExit("Notion no devolvió el id de la página: no se puede anotar que "
                              "existe, y sin eso la pasada siguiente la crearía otra vez")
+        # ⛔ Y el fichero se ARCHIVA en la carpeta del expediente. Hasta aquí seguía en la
+        #    bandeja del formulario: la página de Notion apuntaba a algo que no estaba archivado.
+        _carpeta = extra.get("drive_folder_id") or str(fila.get("drive_folder_id") or "").strip()
+        if str(fila.get("source_drive_file_id") or "").strip() and _carpeta:
+            extra.update(self.mover_a_carpeta(fila, _carpeta))
+
         extra["notion_page_id"] = pid
         extra["notion_page_url"] = str(r.get("url") or "")
         # ⛔ Y se RELEE: que la subida dijera `uploaded` no prueba que el bloque haya quedado en
@@ -376,6 +382,28 @@ class Servicios(object):
             if str((f.get("file_upload") or {}).get("id") or "") == str(subida_id):
                 return True
         return False
+
+    def mover_a_carpeta(self, fila, carpeta_id):
+        """Mueve el fichero de origen a la carpeta del expediente. Devuelve su id.
+
+        ⛔ **Mover, no copiar.** Copiar deja dos ficheros iguales en Drive — el de la bandeja de
+        entrada del formulario y el archivado — y a partir de ahí nadie sabe cuál es el bueno ni
+        cuál se corrige. El pipeline real ya trata la sustitución como un envío NUEVO enlazado al
+        original; duplicar aquí rompería esa cuenta.
+        ⚠️ `addParents`/`removeParents` en la MISMA llamada: en dos, un corte en medio deja el
+        fichero colgando de las dos carpetas o de ninguna.
+        """
+        fid = str(fila.get("source_drive_file_id") or "").strip()
+        destino = str(carpeta_id or "").strip()
+        if not (fid and destino):
+            raise SystemExit("no se mueve el fichero: falta el de origen (%r) o la carpeta (%r)"
+                             % (fid, destino))
+        meta = self.drive.files().get(fileId=fid, fields="parents",
+                                      supportsAllDrives=True).execute() or {}
+        padres = ",".join(meta.get("parents") or [])
+        self.drive.files().update(fileId=fid, addParents=destino, removeParents=padres,
+                                  fields="id,parents", supportsAllDrives=True).execute()
+        return {"drive_primary_file_id": fid}
 
     def registrar(self, fila):
         """Paso 6: añade la fila al Libro de Datos y devuelve dónde quedó."""

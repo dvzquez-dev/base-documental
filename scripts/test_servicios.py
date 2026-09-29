@@ -185,12 +185,17 @@ class _Files(object):
         self.diario.append(("get_media", kw))
         return _Ejec(self.datos)
 
+    def update(self, **kw):
+        self.diario.append(("update", kw))
+        return _Ejec({"id": kw.get("fileId"), "parents": [kw.get("addParents")]})
+
 
 class Drive(object):
     def __init__(self, resp=None, meta=None, datos=b"PDFDATA"):
         self.diario = []
         self._f = _Files(self.diario, resp if resp is not None else {"id": "F-nueva"})
-        self._f.meta = meta if meta is not None else {"name": "doc.pdf", "size": "1024"}
+        self._f.meta = meta if meta is not None else {"name": "doc.pdf", "size": "1024",
+                                                      "parents": ["F-bandeja"]}
         self._f.datos = datos
 
     def files(self):
@@ -472,6 +477,42 @@ try:
 except SystemExit as e:
     _paro = "NO está dentro" in str(e) or "no est" in str(e).lower()
 ok(_paro, "⛔ la página se creó sin el fichero y se dio por buena")
+
+# ── El fichero se ARCHIVA en la carpeta del expediente ─────────────────────────
+# ⛔ MOVER, no copiar: copiar deja dos ficheros iguales — el de la bandeja del formulario y el
+#    archivado — y nadie sabe cuál es el bueno ni cuál se corrige.
+dr = Drive()
+_d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
+                 drive=dr, subir=_subir_ok, notion_get=_leer_bloques_ok).publicar(_CON_FICHERO)
+_upd = [k for a, k in dr.diario if a == "update"]
+ok(len(_upd) == 1, "no mueve el fichero a la carpeta del expediente: %r" % ([a for a, _ in dr.diario],))
+ok(_upd[0]["addParents"] == "F-ya-existe" or _upd[0]["addParents"] == "F-nueva",
+   "no lo mueve a la carpeta del expediente: %r" % (_upd[0],))
+ok(_upd[0]["removeParents"] == "F-bandeja",
+   "⛔ no lo SACA de la bandeja: quedaría colgando de las dos carpetas")
+ok("copy" not in [a for a, _ in dr.diario], "⛔ COPIA en vez de mover: dos ficheros iguales")
+ok(_d.get("drive_primary_file_id") == "D-1", "no devuelve el id del fichero archivado")
+ok(_upd[0].get("supportsAllDrives") is True, "sin supportsAllDrives fallaría en unidad compartida")
+
+# ⛔ Llamado sin carpeta o sin fichero, se para: mover «a ninguna parte» sacaría el fichero de
+#    la bandeja sin meterlo en ningún sitio. Sin este caso la guarda salía CIEGA — `publicar`
+#    sólo la llama cuando tiene las dos cosas.
+for _f, _c in ((_CON_FICHERO, ""), (FILA, "F-x"), ({}, "")):
+    _dr = Drive()
+    try:
+        S.Servicios(drive=_dr).mover_a_carpeta(_f, _c)
+        _paro = False
+    except SystemExit:
+        _paro = True
+    ok(_paro, u"⛔ mover con origen %r y destino %r debería pararse"
+       % (_f.get("source_drive_file_id"), _c))
+    ok(_dr.diario == [], u"⛔ …y no haber tocado Drive")
+
+# ⚠️ Sin fichero de origen no se mueve nada, y la página se crea igual.
+dr = Drive()
+S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_subida,
+            drive=dr, subir=_subir_ok, notion_get=_leer_bloques_ok).publicar(FILA)
+ok("update" not in [a for a, _ in dr.diario], "mueve algo sin haber fichero de origen")
 
 print("%d comprobaciones" % hechas[0])
 if fallos:
