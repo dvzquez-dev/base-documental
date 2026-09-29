@@ -226,8 +226,17 @@ if os.path.exists(_PANEL):
     import hashlib
 
     def _huella(p):
+        """⛔ Los finales de línea se NORMALIZAN antes de comparar.
+
+        Los dos repositorios tienen `core.autocrlf` distinto: el panel guarda LF y aquí git
+        avisa de que los convertirá a CRLF en el próximo checkout. Comparando bytes, esta
+        comprobación se pondría **roja sobre dos ficheros idénticos**, en cuanto alguien
+        clonara el repo — y un guardia que regaña por trabajo bien hecho se acaba apagando,
+        y con él se pierde lo que sí vigilaba. Lo que importa es el contenido.
+        """
         with open(p, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
+            crudo = f.read()
+        return hashlib.sha256(crudo.replace(b"\r\n", b"\n")).hexdigest()
 
     ok(_huella(_AQUI) == _huella(_PANEL),
        u"⛔⛔ la copia de `claude_local.py` HA DIVERGIDO de la del panel (%s):\n"
