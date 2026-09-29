@@ -427,7 +427,17 @@ class Servicios(object):
         ⛔ El tamaño se mira ANTES de descargar: bajarse 40 MB para descubrir que no caben es
         tiempo y memoria tirados, y el error llegaría con el fichero ya en RAM.
         """
-        fid = str(fila.get("source_drive_file_id") or "").strip()
+        # ⛔⛔ EL PDF, NO EL DOCX. Casi todos los expedientes llegan en DOCX y el pipeline
+        #    **genera un PDF**; ese PDF vive en `drive_primary_file_id`, y
+        #    `source_drive_file_id` es el adjunto del formulario. Comprobado con la fila 12,
+        #    cuyas notas dicen que el PDF bueno es `13A2NAK…` — justo lo que trae esa columna.
+        #    ⚠️ Subir el DOCX **no da error**: Notion lo acepta y crea un bloque de fichero
+        #       **que no se puede leer en la página**. Quien abra el documento vería un adjunto
+        #       para descargar, que es justo lo que la página existe para evitar.
+        #    ⚠️ Y si no hay PDF generado se sube el original: quedarse sin documento esperando
+        #       un fichero que nadie va a generar es peor que un adjunto sin previsualización.
+        fid = (str(fila.get("drive_primary_file_id") or "").strip()
+               or str(fila.get("source_drive_file_id") or "").strip())
         if not fid:
             return None
         meta = self.drive.files().get(fileId=fid, fields="name,size",

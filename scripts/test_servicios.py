@@ -726,6 +726,52 @@ _d = S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES
 ok([k for a_, k in _dr.diario if a_ == "create"] == [],
    u"⛔ crea un SEGUNDO resumen teniendo ya `drive_summary_file_id`")
 
+# ── A NOTION SUBE EL PDF, NO EL DOCX QUE MANDÓ EL AUTOR ───────────
+# ⛔⛔ Medido el 29/09: de los 15 expedientes con fichero, **casi todos llegan en DOCX** y el
+#    pipeline de Cowork **genera un PDF** — y ese PDF es el que vive en `drive_primary_file_id`.
+#    Comprobado con dos filas: la 12 dice en sus propias notas que el PDF bueno es
+#    `13A2NAKagBGH4LXQI6rGasDhr3SFo2LNX`, y eso es exactamente lo que trae su
+#    `drive_primary_file_id`. `source_drive_file_id` es **el adjunto del formulario**, o sea el
+#    DOCX.
+#    ⚠️ Subir el DOCX no da error: Notion lo acepta y crea un bloque de fichero **que no se
+#       puede leer en la página**. Quien abra el documento verá un adjunto para descargar, que
+#       es justo lo que la página existe para evitar.
+_subidas_pdf = []
+
+
+def _subir_mira(url, datos, nombre, token=None):
+    _subidas_pdf.append(nombre)
+    return {"status": "uploaded"}
+
+
+class _DosFicheros(Drive):
+    """Un doble que distingue los dos ficheros: el DOCX del formulario y el PDF generado."""
+    NOMBRES = {"D-docx": "Informe_S-2010_26.docx", "D-pdf": "Informe_S-2010_26.pdf"}
+
+    def files(self):
+        f = Drive.files(self)
+        f.get = lambda **kw: _Ejec({"name": self.NOMBRES.get(kw.get("fileId"), "?"),
+                                    "size": "1024", "parents": ["F-bandeja"]})
+        return f
+
+
+_srv = S.Servicios(notion_get=_esq, drive=_DosFicheros(), subir=_subir_mira,
+                   notion=lambda u, c, token=None: {"id": "up-1", "upload_url": "http://x"})
+_srv._subir_fichero({"source_drive_file_id": "D-docx",
+                     "drive_primary_file_id": "D-pdf"})
+ok(_subidas_pdf and _subidas_pdf[-1].endswith(".pdf"),
+   u"⛔ sube a Notion el DOCX del formulario en vez del PDF generado: %r" % (_subidas_pdf,))
+
+# ⚠️ Y si no hay PDF generado, se sube lo que haya: quedarse sin documento por esperar un
+#    fichero que nadie va a generar es peor que un adjunto sin previsualización.
+_subidas_pdf[:] = []
+_srv = S.Servicios(notion_get=_esq, drive=_DosFicheros(), subir=_subir_mira,
+                   notion=lambda u, c, token=None: {"id": "up-1", "upload_url": "http://x"})
+_srv._subir_fichero({"source_drive_file_id": "D-docx"})
+ok(_subidas_pdf and _subidas_pdf[-1].endswith(".docx"),
+   u"sin PDF generado debería subirse el original: %r" % (_subidas_pdf,))
+ok(_srv._subir_fichero({}) is None, u"sin ningún fichero no hay nada que subir")
+
 # ── LOS ANEXOS SE COPIAN A LA CARPETA DEL EXPEDIENTE ────────────
 # ⛔⛔ Un expediente puede traer anexos y el pipeline **no los miraba**. La fila 18 real trae
 #    SIETE. Publicar sin ellos **no da ningún error**: el documento queda archivado, la página
