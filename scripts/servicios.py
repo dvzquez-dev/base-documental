@@ -58,7 +58,14 @@ import sheets_api as SA
 # 📏 Medidos del repo y de las hojas reales.
 HOJA_SOLICITUDES = "1EL5luWUYD5_3onxaDUSHmexzzQZEkPNLW1Y4QzzRg20"
 PESTANA_SOLICITUDES = "SOLICITUDES"
-RANGO_SOLICITUDES = "SOLICITUDES!A1:BZ"
+# ⛔⛔ HASTA `CZ`, NO HASTA `BZ`. La hoja tiene **104 columnas** y el rango llegaba a la 78:
+#    todo lo de `CA` en adelante no llegaba nunca al código — `replaces_document`, los
+#    `annex_*`, `range_end` y **`revisor_field_pendiente`**. Las guardas que los miran estaban
+#    escritas, probadas y **sin datos**: en la primera pasada real contra Google la fila 18
+#    salió como «lista para cerrar» — la que existe una guarda entera para NO cerrar — y con
+#    `--aplicar` se habría cerrado. Lo ata un caso de `test_servicios.py` que cruza este
+#    rango con las columnas que los módulos nombran, contra la cabecera real.
+RANGO_SOLICITUDES = "SOLICITUDES!A1:CZ"
 HOJA_LIBRO = "1QoEY_5PYYidKlT2RNX_5m5Jq7-h-xfU_z6cZQ6pFSwE"
 PESTANA_LIBRO = "Base de Datos"
 # ⛔⛔ **2025-09-03, no 2022-06-28.** `notion_api.cuerpo_pagina` manda

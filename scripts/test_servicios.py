@@ -151,8 +151,15 @@ ok("readonly" not in " ".join(S.ALCANCES),
 sh = Sheets({"get": {"values": [["request_id"], ["R-1"]]}})
 srv = S.Servicios(notion_get=_esq, sheets=sh)
 ok(srv.leer() == [["request_id"], ["R-1"]], u"`leer` no devuelve los valores crudos")
-ok(sh.diario[0][1]["range"] == "SOLICITUDES!A1:BZ",
-   u"`leer` no pide el rango medido: %r" % (sh.diario[0][1],))
+# ⛔⛔ ESTE CASO FIJABA `A1:BZ`, que es **78 columnas de las 104** de la hoja. O sea que
+#    sostenía el fallo: con él verde, `revisor_field_pendiente` y los `annex_*` no llegaban al
+#    código y sus guardas se quedaban sin datos. Se corrige con su motivo escrito, y lo que
+#    de verdad vigila el rango es el caso de más abajo, que lo cruza con las columnas que los
+#    módulos nombran — un literal copiado aquí no puede saber si llega o no llega.
+ok(sh.diario[0][1]["range"] == S.RANGO_SOLICITUDES,
+   u"`leer` no pide el rango que declara el módulo: %r" % (sh.diario[0][1],))
+ok(sh.diario[0][1]["range"].endswith(":CZ"),
+   u"el rango no llega al final de la hoja: %r" % (sh.diario[0][1]["range"],))
 ok(sh.diario[0][1]["spreadsheetId"] == S.HOJA_SOLICITUDES, u"`leer` pide otra hoja")
 
 # ⛔ El Libro se pide CON LA PESTAÑA ENTRECOMILLADA: «Base de Datos» lleva espacios y sin
@@ -1005,6 +1012,82 @@ ok(S.Servicios(notion_get=_hijos_con_anexos, notion_patch=_patch_ok)
   .enlazar_anexos("", ["C-1"]) is False, u"sin página no hay dónde enlazar")
 ok(S.Servicios(notion_get=_hijos_con_anexos, notion_patch=_patch_ok)
   .enlazar_anexos("p-1", []) is False, u"sin anexos no hay nada que enlazar")
+
+# ── EL RANGO TIENE QUE LLEGAR A TODAS LAS COLUMNAS QUE ALGUIEN LEE ────
+# ⛔⛔ El rango era `A1:BZ` — **78 columnas de las 104 que tiene la hoja**. Todo lo de `CA` en
+#    adelante no llegaba nunca al código: `replaces_document`, los `annex_*`, `range_end` y
+#    **`revisor_field_pendiente`**. Las guardas estaban escritas, probadas y **sin datos**: en la
+#    primera pasada real contra Google, la fila 18 salió como «lista para cerrar» — la que existe
+#    una guarda entera para NO cerrar — y con `--aplicar` se habría cerrado.
+#    ⚠️ El rango y las columnas que se leen viven en ficheros distintos, que es donde nadie mira.
+#       Este caso los junta: se descubren por `ast` las cadenas que el código usa como columna y
+#       se exige que **todas** caigan dentro del rango, contra la cabecera REAL.
+import ast as _ast2
+import io as _io2
+import re as _re2
+
+# 📏 La cabecera entera de `SOLICITUDES`, leída el 29/09/2026 (`A1:CZ1`): **104 columnas**.
+CABECERA_REAL = [
+    "request_id", "form_row", "received_at", "form_email", "author_name_raw",
+    "author_notion_user_id", "author_email", "title_short", "document_type", "unit_key",
+    "unit_label", "subfolder_key", "subfolder_label", "season_label", "season_suffix",
+    "reserved_id", "reference", "technical_name", "source_drive_file_id", "source_drive_url",
+    "source_filename", "sha256_original", "sha256_corrected", "text_fingerprint",
+    "duplicate_status", "duplicate_matches_json", "analysis_json", "executive_summary",
+    "quality_issues", "tags_json", "received", "analyzed", "id_reserved",
+    "approval_email_sent", "reported", "approved", "rejected", "changes_requested",
+    "notion_page_created", "notion_pdf_embedded", "notion_embedding_verified",
+    "drive_folder_created", "drive_primary_file_verified", "drive_summary_created",
+    "domain_permission_verified", "base_database_registered", "author_confirmation_sent",
+    "thread_confirmation_sent", "closed", "approval_thread_id", "approval_message_id",
+    "reviewer_public_annotations", "reviewer_internal_annotations",
+    "reviewer_discord_instructions", "first_reported_at", "last_reported_at",
+    "next_reminder_at", "reminder_count", "notion_page_id", "notion_page_url",
+    "drive_folder_id", "drive_folder_url", "drive_primary_file_id", "drive_summary_file_id",
+    "base_database_row", "last_error", "retry_count", "updated_at", "decision_at",
+    "approved_at", "rejected_at", "changes_requested_at", "partial_alerted_at",
+    "next_partial_alert_at", "partial_alert_count", "drive_docx_file_id", "author_name",
+    "unit_label", "subfolder_label", "range_start", "range_end", "drive_route_folder_id",
+    "context", "submitted_annotations", "replaces_document", "replacement_reference",
+    "replacement_reason", "annex_drive_file_ids_json", "annex_source_urls",
+    "annex_copied_count", "annex_final_file_ids_json", "source_mime_type",
+    "source_size_bytes", "source_md5_drive", "form_response_key", "notion_docx_attached",
+    "notion_annex_link_verified", "author_decision_notification_sent",
+    "author_decision_notification_message_id", "revisor_field_pendiente",
+    "revisor_field_valor", "publication_title_source", "publication_title_review_status",
+    "base_database_chip_verified"]
+ok(len(CABECERA_REAL) == 104, u"la cabecera medida no son 104: %d" % len(CABECERA_REAL))
+
+_m = _re2.search(r"![A-Z]+\d*:([A-Z]+)", S.RANGO_SOLICITUDES)
+ok(_m is not None, u"el rango no tiene forma de rango: %r" % (S.RANGO_SOLICITUDES,))
+
+
+def _n_col(letras):
+    n = 0
+    for c in letras:
+        n = n * 26 + (ord(c) - 64)
+    return n
+
+
+_hasta = _n_col(_m.group(1)) if _m else 0
+ok(_hasta >= 104,
+   u"⛔ el rango llega a la columna %d de 104: todo lo de más allá no llega al código, y las "
+   u"guardas que lo miran se quedan sin datos" % _hasta)
+
+# ⛔ Y las columnas que el código NOMBRA tienen que existir en esa cabecera y caer dentro.
+_COLS = set()
+for _mod in ("cierre", "anexos", "sustitucion", "hoja", "evidencias", "pasada"):
+    _arb = _ast2.parse(_io2.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                           _mod + ".py"), encoding="utf-8").read())
+    for _n in _ast2.walk(_arb):
+        if isinstance(_n, _ast2.Constant) and isinstance(_n.value, str):
+            if _n.value in CABECERA_REAL:
+                _COLS.add(_n.value)
+ok(len(_COLS) >= 25, u"el descubridor ve muy pocas columnas (%d): mediría de mentira" % len(_COLS))
+_fuera = sorted(c for c in _COLS if CABECERA_REAL.index(c) + 1 > _hasta)
+ok(_fuera == [],
+   u"⛔ el código lee columnas que el rango NO trae: %r — la guarda existe y no recibe nada"
+   % (_fuera,))
 
 # ── LA FUENTE DE DATOS SE DEDUCE, NO SE PIDE ───────────────────
 # ⛔⛔ `NOTION_DATA_SOURCE_ID` era un secreto más que alguien tenía que ir a buscar — y para
