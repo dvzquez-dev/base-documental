@@ -30,7 +30,10 @@ on:
         type: boolean
         default: false
       limite:
-        description: "Máximo de expedientes a tocar (vacío = todos)"
+        # ⛔ `0` = sin tope. NO vale dejarlo vacío: GitHub aplica el valor POR DEFECTO cuando el
+        #    input llega vacío, así que «vacío = todos» era mentira — medido lanzándolo con
+        #    `-f limite=""` y mirando 3 expedientes de 17.
+        description: "Máximo de expedientes a tocar (0 = todos)"
         type: string
         default: "3"
       revisar:
@@ -101,7 +104,7 @@ jobs:
             ARGS="--revisar"
           else
             if [ "${{ inputs.aplicar }}" = "true" ]; then ARGS="--aplicar"; fi
-            if [ -n "${{ inputs.limite }}" ]; then ARGS="$ARGS --limite ${{ inputs.limite }}"; fi
+            if [ -n "${{ inputs.limite }}" ] && [ "${{ inputs.limite }}" != "0" ]; then ARGS="$ARGS --limite ${{ inputs.limite }}"; fi
           fi
           echo "argumentos: ${ARGS:-(pasada seca, sin tope)}"
           python scripts/cli.py $ARGS | tee salida.txt
