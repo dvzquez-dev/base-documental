@@ -145,6 +145,36 @@ for mala in (1, 0, -2, None, "x"):
 ok(H.celdas_de_cambios(["a"], 5, {}) == ([], []), "sin cambios no hay celdas ni motivos")
 ok(H.celdas_de_cambios(["a"], 5, None) == ([], []), "unos cambios None no deberían reventar")
 
+# ── UNA CELDA QUE TRAE UNA LISTA: EN JSON O SEPARADA POR COMAS ──────
+# ⛔⛔ Puerta única porque el problema tiene la misma FORMA en dos columnas y curarlo en una
+#    dejaría la otra rota. Medido el 29/09/2026: `tags_json` trae JSON en 14 filas y **comas en
+#    una**; `annex_drive_file_ids_json` trae `[]` en unas y **`id, id, id`** en la que tiene
+#    anexos. Las dos se llaman `_json` y **las dos mienten**.
+ok(H.lista_de_celda(u'["a","b"]') == ([u"a", u"b"], []), u"el JSON bueno debería pasar limpio")
+_l, _m = H.lista_de_celda(u"a, b, c")
+ok(_l == [u"a", u" b", u" c"],
+   u"no parte por comas (se recorta más arriba, no aquí): %r" % (_l,))
+ok(_m and "comas" in _m[0], u"no deja constancia del formato: %r" % (_m,))
+ok(H.lista_de_celda(u"") == ([], []) and H.lista_de_celda(u"   ") == ([], []),
+   u"una celda vacía no da elementos ni motivos")
+ok(H.lista_de_celda(None) == ([], []), u"None tampoco")
+ok(H.lista_de_celda(u"[]") == ([], []), u"una lista JSON vacía tampoco")
+ok(H.lista_de_celda([u"ya", u"es", u"lista"])[0] == [u"ya", u"es", u"lista"],
+   u"una lista de verdad debería pasar tal cual")
+# ⛔ Un JSON ROTO es un error, no una lista por comas.
+for _roto in (u'["a", "b"', u'[1, 2', u'{"a": 1'):
+    _l, _m = H.lista_de_celda(_roto, u"`annex_drive_file_ids_json`")
+    ok(_l == [] and _m and "JSON" in _m[0], u"%r debería ser un error: %r" % (_roto, _m))
+    ok(any("annex_drive_file_ids_json" in m for m in _m),
+       u"el motivo no dice de qué columna habla: %r" % (_m,))
+# Un JSON válido que no es lista, tampoco vale.
+ok(H.lista_de_celda(u'{"a": 1}')[0] == [] and "lista" in H.lista_de_celda(u'{"a": 1}')[1][0],
+   u"un objeto JSON debería rechazarse diciendo que no es una lista")
+ok(H.lista_de_celda(7)[0] == [] and H.lista_de_celda(7)[1],
+   u"un número suelto no es una lista")
+# ⚠️ El nombre por defecto no puede quedarse en un hueco: el motivo se lee sin el código.
+ok("celda" in H.lista_de_celda(u'["a"')[1][0], u"sin nombre, el motivo no dice de qué habla")
+
 # ── FILAS DESPLAZADAS: la cabecera dice una cosa y la celda es de otra ────
 # ⛔⛔ Medido en `SOLICITUDES` el 29/09/2026: **4 de las 17 filas** —las cuatro ingeridas el
 #    09/07— llevan su cola **dos columnas a la izquierda**. El síntoma real: el tipo MIME

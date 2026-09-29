@@ -212,6 +212,13 @@ class _Files(object):
         self.diario.append(("get_media", kw))
         return _Ejec(self.datos)
 
+    def copy(self, **kw):
+        self.diario.append(("copy", kw))
+        # ⚠️ Cada copia devuelve un id DISTINTO, como Drive: un doble que devolviera siempre
+        #    el mismo dejaría pasar un código que se queda con uno solo de los siete.
+        self.copias = getattr(self, "copias", 0) + 1
+        return _Ejec({"id": "C-%d" % self.copias})
+
     def update(self, **kw):
         self.diario.append(("update", kw))
         # ⚠️ El doble MUEVE de verdad: tras el update, `get` devuelve el padre nuevo. Un doble
@@ -708,6 +715,73 @@ _d = S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES
                                           drive_summary_file_id="F-ya"))
 ok([k for a_, k in _dr.diario if a_ == "create"] == [],
    u"⛔ crea un SEGUNDO resumen teniendo ya `drive_summary_file_id`")
+
+# ── LOS ANEXOS SE COPIAN A LA CARPETA DEL EXPEDIENTE ────────────
+# ⛔⛔ Un expediente puede traer anexos y el pipeline **no los miraba**. La fila 18 real trae
+#    SIETE. Publicar sin ellos **no da ningún error**: el documento queda archivado, la página
+#    creada y el expediente cerrado, sin los siete ficheros que lo acompañan.
+# ⛔ **Copiar, no mover**: el origen es el adjunto del formulario, que es de quien lo subió.
+#    Moverlo se lo quita de su Drive. El documento principal sí se mueve; un anexo se copia.
+_dr = Drive()
+_d = S.Servicios(notion_get=_esq, drive=_dr).copiar_anexos(
+    {"annex_drive_file_ids_json": "a1, a2, a3"}, "F-exp")
+_copias = [k for a_, k in _dr.diario if a_ == "copy"]
+ok(len(_copias) == 3, u"⛔ no copia los tres anexos: %r" % (_dr.diario,))
+ok([k["fileId"] for k in _copias] == ["a1", "a2", "a3"],
+   u"no copia los ids que trae la fila: %r" % ([k.get("fileId") for k in _copias],))
+ok(all(k["body"]["parents"] == ["F-exp"] for k in _copias),
+   u"⛔ los anexos no van a la carpeta del expediente: %r" % (_copias[0]["body"],))
+ok(all(k.get("supportsAllDrives") is True for k in _copias),
+   u"sin `supportsAllDrives` fallaría en una unidad compartida")
+ok("update" not in [a_ for a_, _ in _dr.diario],
+   u"⛔ MUEVE un anexo en vez de copiarlo: se lo quita del Drive de quien lo subió")
+ok(_d.get("annex_copied_count") == 3, u"no devuelve cuántos copió: %r" % (_d,))
+ok(_d.get("annex_final_file_ids_json") == '["C-1", "C-2", "C-3"]',
+   u"no devuelve los ids de las copias, que es la prueba: %r" % (_d,))
+
+# ⚠️ Los ya copiados no se vuelven a copiar: cada pasada dejaría siete duplicados más.
+_dr = Drive()
+_d = S.Servicios(notion_get=_esq, drive=_dr).copiar_anexos(
+    {"annex_drive_file_ids_json": "a1, a2", "annex_final_file_ids_json": '["C-1","C-2"]',
+     "annex_copied_count": "2"}, "F-exp")
+ok(_dr.diario == [] and _d == {},
+   u"⛔ vuelve a copiar unos anexos ya copiados: cada pasada duplicaría los ficheros")
+
+# Sin anexos, ni sin carpeta, no se toca nada.
+ok(S.Servicios(notion_get=_esq, drive=Drive()).copiar_anexos({}, "F-exp") == {},
+   u"sin anexos no hay nada que copiar")
+_dr = Drive()
+ok(S.Servicios(notion_get=_esq, drive=_dr).copiar_anexos(
+    {"annex_drive_file_ids_json": "a1"}, "") == {} and _dr.diario == [],
+   u"⛔ sin carpeta, las copias colgarían de la raíz de Drive")
+
+# ⛔ Si Drive no devuelve el id de una copia, se para: sin él no queda constancia y la pasada
+#    siguiente la volvería a copiar.
+class _SinId(Drive):
+    def files(self):
+        f = Drive.files(self)
+        f.copy = lambda **kw: _Ejec({})
+        return f
+
+
+try:
+    S.Servicios(notion_get=_esq, drive=_SinId()).copiar_anexos(
+        {"annex_drive_file_ids_json": "a1"}, "F-exp")
+    _paro = False
+except SystemExit as e:
+    _paro = "anexo" in str(e)
+ok(_paro, u"⛔ Drive sin devolver el id de una copia debería pararse y decirlo")
+
+# ── Y `publicar` los copia ────────────────────────────────
+# ⚠️ Probar el método suelto deja ciega la línea que lo llama: es la TERCERA vez hoy.
+_dr = Drive()
+_d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
+                 notion_get=_esq, drive=_dr).publicar(
+                     dict(FILA, annex_drive_file_ids_json="a1, a2"))
+ok(_d.get("annex_copied_count") == 2,
+   u"⛔ `publicar` no copia los anexos del expediente: %r" % (_d,))
+ok([k["body"]["parents"] for a_, k in _dr.diario if a_ == "copy"] == [["F-ya-existe"]] * 2,
+   u"los anexos no van a la carpeta del expediente: %r" % (_dr.diario,))
 
 # ── LA VERSIÓN DE LA API Y LA FORMA DEL CUERPO TIENEN QUE CUADRAR ─────
 # ⛔⛔ `notion_api.cuerpo_pagina` manda `parent = {"type": "data_source_id", …}`, que es la

@@ -207,6 +207,21 @@ _lineas, _ = CLI.revisar_datos([_CAB2, ["SOL-8", "6499", "7", "FALSE"]], [])
 ok(not [l for l in _lineas if l.startswith("COLUMNA")],
    u"canta sobre una fila sana: %r" % (_lineas,))
 
+# ── El repaso canta lo que no cuadra en los ANEXOS ───────────────
+_CAB3 = ["request_id", "annex_drive_file_ids_json", "annex_final_file_ids_json",
+         "annex_copied_count", "closed"]
+_l, _ = CLI.revisar_datos(
+    [_CAB3, ["SOL-7", "a, b", '["x","y"]', "1", "FALSE"]], [])
+ok(any(l.startswith("ANEXOS") for l in _l), u"⛔ el repaso no mira los anexos: %r" % (_l,))
+ok(any("miente" in l for l in _l), u"no dice qué no cuadra: %r" % (_l,))
+ok(any("SOL-7" in l for l in _l), u"no dice de qué expediente es")
+# ⚠️ Y la fila real, que trae los ids por comas y está en regla, **no canta**: un aviso que
+#    sale sobre trabajo bien hecho enseña a ignorarlo.
+_l, _ = CLI.revisar_datos(
+    [_CAB3, ["SOL-6", "a, b", '["x", "y"]', "2", "FALSE"]], [])
+ok(not [l for l in _l if l.startswith("ANEXOS")],
+   u"⛔ canta sobre unos anexos en regla que venían por comas: %r" % (_l,))
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

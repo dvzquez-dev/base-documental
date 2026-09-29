@@ -31,6 +31,7 @@ for _f in (sys.stdout, sys.stderr):
     except Exception:  # pragma: no cover
         pass
 
+import anexos as AX
 import cierre as C
 import ejecutor as E
 import hoja as H
@@ -106,6 +107,12 @@ def revisar_datos(valores_solicitudes, filas_libro):
 
     for n, rid, que in C.revisar(registros):
         lineas.append(u"CIERRE    fila %d %s — %s" % (n, rid, que))
+
+    # Los anexos: un expediente puede traerlos y publicarlo sin ellos no da ningún error.
+    for i, r in enumerate(registros):
+        rid = str(r.get("request_id") or "").strip() or u"(sin request_id)"
+        for que in AX.revisar(r):
+            lineas.append(u"ANEXOS    fila %d %s — %s" % (i + 2, rid, que))
 
     for n, ref, que in LD.revisar(filas_libro or []):
         lineas.append(u"LIBRO     fila %d %s — %s" % (n, ref, que))

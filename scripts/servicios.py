@@ -47,6 +47,7 @@ for _f in (sys.stdout, sys.stderr):
     except Exception:  # pragma: no cover
         pass
 
+import anexos as AX
 import drive_api as DA
 import hoja as H
 import libro_datos as LD
@@ -379,6 +380,10 @@ class Servicios(object):
         #    tiene resumen igual, y colgarlo de ahí lo dejaba sin archivar sin decir nada.
         if _carpeta and not str(fila.get("drive_summary_file_id") or "").strip():
             extra.update(self.crear_resumen(fila, _carpeta))
+        # ⛔ Y los ANEXOS, a la misma carpeta. Publicar sin ellos no da ningún error: el
+        #    documento queda archivado y cerrado sin los ficheros que lo acompañan.
+        if _carpeta:
+            extra.update(self.copiar_anexos(fila, _carpeta))
 
         extra["notion_page_id"] = pid
         extra["notion_page_url"] = str(r.get("url") or "")
@@ -502,6 +507,32 @@ class Servicios(object):
                 return True
         raise SystemExit("el permiso de dominio no consta tras crearlo: el equipo no podría "
                          "abrir el documento y la página diría que sí")
+
+    def copiar_anexos(self, fila, carpeta_id):
+        """Copia a la carpeta del expediente los anexos que falten. `{}` si no hay nada que hacer.
+
+        ⛔ **Copiar, no mover.** El origen es el adjunto del formulario, que es de quien lo
+        subió: moverlo se lo quita de su Drive. El documento principal sí se mueve —es el
+        expediente—; un anexo se copia, y por eso hay dos listas de ids y no una.
+        ⚠️ Y los ya copiados **no se vuelven a copiar**: cada pasada dejaría siete duplicados
+        más en la carpeta, y en Drive nadie los va a borrar.
+        """
+        destino = str(carpeta_id or "").strip()
+        ids, _ = AX.origen(fila)
+        if not ids or not destino or not AX.faltan(fila):
+            return {}
+        copiados = []
+        for fid in ids:
+            r = self.drive.files().copy(
+                fileId=fid, body={"parents": [destino]}, fields="id",
+                supportsAllDrives=True).execute() or {}
+            cid = str(r.get("id") or "").strip()
+            if not cid:
+                raise SystemExit("Drive no devolvió el id de la copia del anexo %s: sin él no "
+                                 "queda constancia y la pasada siguiente lo copiaría otra vez"
+                                 % fid)
+            copiados.append(cid)
+        return AX.cambios(copiados)
 
     def crear_resumen(self, fila, carpeta_id):
         """Escribe el resumen ejecutivo como fichero de texto dentro de la carpeta.

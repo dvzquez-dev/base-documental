@@ -27,6 +27,7 @@ Cómo se prueba
 --------------
 `python scripts/test_hoja.py` — sin red ni credenciales.
 """
+import json
 import sys
 
 for _f in (sys.stdout, sys.stderr):
@@ -105,6 +106,45 @@ def a_registros(valores):
     cabecera = valores[0]
     _mapa, duplicadas = indices(cabecera)
     return [a_registro(cabecera, f) for f in valores[1:]], duplicadas
+
+
+def lista_de_celda(valor, nombre=u"la celda"):
+    """`(elementos, motivos)` de una celda que trae una lista — **en JSON o separada por comas**.
+
+    ⛔⛔ Una puerta única porque el problema tiene la misma FORMA en dos columnas distintas, y
+    curarlo en una sola dejaría la otra rota. Medido en `SOLICITUDES` el 29/09/2026:
+    `tags_json` trae lista JSON en 14 filas y **separada por comas en una**; y
+    `annex_drive_file_ids_json` trae `[]` en unas filas y **`id, id, id`** en la que tiene anexos.
+    Las dos columnas se llaman `_json` y **las dos mienten**.
+
+    ⚠️ Un JSON **roto** sigue siendo un error, no una lista por comas: leerlo «como se pueda»
+    convertiría `["a", "b"` en dos elementos llamados `["a"` y `"b"`.
+    """
+    if isinstance(valor, bytes):
+        valor = valor.decode("utf-8", "replace")
+    if not isinstance(valor, str):
+        if valor is None:
+            return [], []
+        if isinstance(valor, list):
+            return list(valor), []
+        return [], [u"%s no es una lista, es %s" % (nombre, type(valor).__name__)]
+
+    txt = valor.strip()
+    if not txt:
+        return [], []
+    try:
+        datos = json.loads(txt)
+    except Exception:
+        if txt[:1] in ("[", "{"):
+            return [], [u"%s empieza como JSON y no lo es: %r" % (nombre, valor)]
+        trozos = txt.split(",")
+        return trozos, [u"%s no venía en JSON sino separada por comas; se han leído %d "
+                        u"elementos" % (nombre, len([x for x in trozos if x.strip()]))]
+    if datos is None:
+        return [], []
+    if not isinstance(datos, list):
+        return [], [u"%s no es una lista, es %s" % (nombre, type(datos).__name__)]
+    return datos, []
 
 
 # ⛔⛔ Las columnas que **son números enteros**. No es una corazonada: es lo que permite cazar una

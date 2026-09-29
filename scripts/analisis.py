@@ -32,13 +32,18 @@ Cómo se prueba
 `python scripts/test_analisis.py` — sin red ni credenciales.
 """
 import json
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 for _f in (sys.stdout, sys.stderr):
     try:
         _f.reconfigure(encoding="utf-8")
     except Exception:  # pragma: no cover
         pass
+
+import hoja as H
 
 
 NIVELES = ("baja", "media", "alta")
@@ -114,32 +119,12 @@ def etiquetas(valor):
     ⚠️ Aquí, a diferencia de las propiedades de la página, las buenas **sí pasan**: perder todas
     las etiquetas porque una lleve una coma deja el documento sin indexar por ninguna.
     """
-    motivos = []
-    brutas = valor
-    if isinstance(valor, (str, bytes)):
-        crudo = valor.decode("utf-8", "replace") if isinstance(valor, bytes) else valor
-        txt = crudo.strip()
-        if not txt:
-            return [], []
-        try:
-            brutas = json.loads(txt)
-        except Exception:
-            # ⛔⛔ La columna se llama `tags_json` y **miente en una fila de quince**. Medido en
-            #    `SOLICITUDES` el 29/09/2026: 14 filas traen una lista JSON y la 8
-            #    (`SOL-DOC-20260706-202210-1I8XUUNL`) trae las etiquetas **separadas por comas**.
-            #    Con el lector estricto esa fila se publicaba con **0 etiquetas de 19**: el
-            #    documento queda archivado y **no sale en ninguna búsqueda**. Se lee lo que hay.
-            #    ⚠️ Pero un JSON **roto** sigue siendo un error: leerlo «como se pueda»
-            #       convertiría `["a", "b"` en etiquetas llamadas `["a"` y `"b"`.
-            if txt[:1] in ("[", "{"):
-                return [], [u"`tags_json` empieza como JSON y no lo es: %r" % (crudo,)]
-            brutas = txt.split(",")
-            motivos.append(u"`tags_json` no venía en JSON sino separado por comas; se han leído "
-                           u"%d etiquetas" % len([x for x in brutas if x.strip()]))
-    if brutas is None:
-        return [], []
-    if not isinstance(brutas, list):
-        return [], [u"`tags_json` no es una lista, es %s" % type(brutas).__name__]
+    # ⛔ Por la PUERTA ÚNICA: la columna se llama `tags_json` y **miente en una fila de
+    #    quince** — medido el 29/09/2026—, y la de los anexos hace lo mismo. El lector de
+    #    «JSON o comas» vive en `hoja.lista_de_celda` para que curarlo aquí no deje rota la otra.
+    brutas, motivos = H.lista_de_celda(valor, u"`tags_json`")
+    if motivos and not brutas:
+        return [], motivos
 
     fuera = []
     vistas = set()
