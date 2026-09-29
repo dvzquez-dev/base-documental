@@ -769,9 +769,79 @@ class Servicios(object):
             raise SystemExit("el Libro no dijo en qué fila quedó (%r): sin eso no queda prueba "
                              "de que se escribió, y la pasada siguiente lo registraría otra vez"
                              % donde)
+        # ⛔ El chip va DESPUÉS y su fallo NO tira el registro. Ver `poner_chip`.
+        self.poner_chip(fila, n)
         # ⛔ UN NÚMERO, que es lo que llevan las filas reales de `SOLICITUDES` (169, 171, 172),
         #    no el rango A1 que devuelve `append`. Medido el 29/09.
         return {"base_database_row": n}
+
+    def pestana_id(self, hoja, titulo):
+        """El `sheetId` numérico de una pestaña por su título, o `None`.
+
+        ⚠️ `batchUpdate` con `updateCells` no entiende el nombre de la pestaña: quiere el id.
+        """
+        r = self.sheets.spreadsheets().get(
+            spreadsheetId=hoja, fields="sheets.properties(sheetId,title)").execute() or {}
+        for s in (r.get("sheets") or []):
+            p = (s or {}).get("properties") or {}
+            if str(p.get("title") or "") == titulo:
+                return p.get("sheetId")
+        return None
+
+    def poner_chip(self, fila, n_fila):
+        """Pone el **chip de la carpeta** en la ubicación del Libro, y **comprueba releyendo**.
+
+        ⛔⛔ **NUNCA lanza, y eso es la pieza.** Se llama cuando la fila del Libro **ya está
+        escrita**. Si un fallo aquí tirase el registro, se perdería `base_database_row` —la prueba
+        de que la fila existe— y la pasada siguiente escribiría **una SEGUNDA fila** en el Libro
+        para el mismo documento. Un duplicado en el índice es de los defectos que más cuesta ver,
+        y el Libro real ya arrastra varios de esa familia.
+
+        ⛔ **Y comprueba releyendo, no por que la petición no diera error.** Nadie ha probado
+        nunca que la API de Sheets deje **escribir** chips —Cowork los pone a mano en el
+        navegador—, así que dar por hecho que quedó sería dejar **texto plano haciéndose pasar
+        por chip** justo en la columna que se usa para buscar.
+
+        Devuelve `True` si el chip quedó, `False` si no. Lo que no quedó **se dice en voz alta**.
+        """
+        carpeta = str((fila or {}).get("drive_folder_id") or "").strip()
+        ref = str((fila or {}).get("reference") or "").strip()
+        if not carpeta:
+            sys.stderr.write(u"aviso: sin `drive_folder_id`, la ubicación del Libro se queda en "
+                             u"texto (fila %s)\n" % (n_fila,))
+            return False
+        try:
+            hid = self.pestana_id(HOJA_LIBRO, PESTANA_LIBRO)
+            pet = LD.peticion_chip(hoja_id=hid, fila_1based=n_fila, folder_id=carpeta, texto=ref)
+            if pet is None:
+                raise ValueError(u"no se pudo montar la petición (pestaña %r, fila %r)"
+                                 % (hid, n_fila))
+            (self.sheets.spreadsheets()
+             .batchUpdate(spreadsheetId=HOJA_LIBRO, body={"requests": [pet]}).execute())
+
+            a1 = u"%s!%s%d" % (SA.nombre_pestana(PESTANA_LIBRO),
+                              chr(ord("A") + LD.COL_UBICACION), n_fila)
+            r = self.sheets.spreadsheets().get(
+                spreadsheetId=HOJA_LIBRO, ranges=[a1], includeGridData=True,
+                fields="sheets.data.rowData.values(userEnteredValue,chipRuns)").execute() or {}
+            celda = {}
+            for s in (r.get("sheets") or []):
+                for d in (s.get("data") or []):
+                    for rw in (d.get("rowData") or []):
+                        for v in (rw.get("values") or []):
+                            celda = v or {}
+            if LD.chip_puesto(celda, carpeta):
+                return True
+            sys.stderr.write(
+                u"AVISO: el chip de la carpeta NO quedó en el Libro (fila %s, %s). La fila SÍ "
+                u"está escrita; lo que falta es el chip, y la celda tiene el texto debajo. Si la "
+                u"API de Sheets no admite escribir chips, hay que ponerlo a mano.\n"
+                % (n_fila, ref or carpeta))
+            return False
+        except Exception as e:
+            sys.stderr.write(u"AVISO: no se pudo poner el chip en el Libro (fila %s): %s: %s. La "
+                             u"fila SÍ está escrita.\n" % (n_fila, type(e).__name__, e))
+            return False
 
     def cerrar(self, fila):
         """Paso 7: no hay nada que hacer **en el mundo** — el cierre es la bandera.

@@ -125,6 +125,85 @@ def claves(texto):
     return fuera
 
 
+# ── El chip de la carpeta ──────────────────────────────────────────────────────────────────
+# ⛔ Lo pidió Daniel así: *«lo que tienes que enlazar es el chip de la carpeta no el link ni
+#    hostias… y dentro de la carpeta está el procesamiento con IA y está el archivo original y
+#    está, si hay un Word, el PDF»*. La celda de ubicación llevaba el NOMBRE DEL FICHERO en texto
+#    plano, que no lleva a ninguna parte.
+# ⚠️ **Nadie ha probado nunca que la API de Sheets deje ESCRIBIR chips** — Cowork los pone a mano
+#    en el navegador. Por eso `chip_puesto` existe: se relee la celda y se confirma. Sin eso, el
+#    pipeline dejaría texto plano haciéndose pasar por chip, y el Libro es justo donde se busca.
+URL_CARPETA = "https://drive.google.com/drive/folders/%s"
+
+# La columna donde va: «Ubicación del Archivo», la segunda de `COLUMNAS` (índice 1, 0-based).
+COL_UBICACION = 1
+
+
+def url_carpeta(folder_id):
+    """La URL de una CARPETA de Drive, o `None`.
+
+    ⛔ No es `/file/d/<id>/view`: ésa es la de un fichero, y con un id de carpeta abriría un
+    error. Son dos formas parecidas que llevan a sitios distintos.
+    """
+    fid = str(folder_id or "").strip()
+    if not fid:
+        return None
+    return URL_CARPETA % fid
+
+
+def peticion_chip(hoja_id, fila_1based, folder_id, texto=None):
+    """La petición de `batchUpdate` que pone el chip en la celda de ubicación. `None` si falta algo.
+
+    ⛔⛔ **`fila_1based` es 1-based y el índice del rango es 0-based.** Equivocarse aquí **no da
+    ningún error**: escribe el chip en la fila de al lado, o sea en el expediente de otra persona.
+    Y la fila 0 no existe en 1-based: aceptarla escribiría en la **cabecera**.
+    ⛔ **`fields` manda.** Sin él, `updateCells` borra el resto de la celda; y el texto va debajo
+    del chip a propósito: si el chip no se renderiza, la ubicación **no queda en blanco**.
+    """
+    fid = str(folder_id or "").strip()
+    uri = url_carpeta(fid)
+    if not uri or hoja_id is None or not isinstance(fila_1based, int) or fila_1based < 1:
+        return None
+    etiqueta = str(texto or "").strip() or fid
+    return {
+        "updateCells": {
+            "range": {
+                "sheetId": hoja_id,
+                "startRowIndex": fila_1based - 1,
+                "endRowIndex": fila_1based,
+                "startColumnIndex": COL_UBICACION,
+                "endColumnIndex": COL_UBICACION + 1,
+            },
+            "rows": [{"values": [{
+                "userEnteredValue": {"stringValue": etiqueta},
+                "chipRuns": [{"startIndex": 0,
+                              "chip": {"richLinkProperties": {"uri": uri}}}],
+            }]}],
+            "fields": "userEnteredValue,chipRuns",
+        }
+    }
+
+
+def chip_puesto(celda, folder_id):
+    """¿La celda releída lleva de verdad el chip de ESA carpeta? `True`/`False`, nunca lanza.
+
+    ⛔⛔ Compara la URL, no solo que haya un chip: uno que apunta a **otra** carpeta es peor que
+    ninguno, porque manda al revisor al expediente equivocado con toda la confianza.
+    ⚠️ Y un texto que **contiene** la URL no cuenta: eso es el enlace pelado, que es exactamente
+    lo que se pidió no hacer.
+    """
+    uri = url_carpeta(folder_id)
+    if not uri or not isinstance(celda, dict):
+        return False
+    for run in (celda.get("chipRuns") or []):
+        if not isinstance(run, dict):
+            continue
+        props = ((run.get("chip") or {}).get("richLinkProperties") or {})
+        if str(props.get("uri") or "").strip() == uri:
+            return True
+    return False
+
+
 def fila(expediente):
     """La fila de tres celdas para el Libro, o `(None, motivos)`.
 

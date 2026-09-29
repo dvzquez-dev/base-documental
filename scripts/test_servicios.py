@@ -373,14 +373,57 @@ ok(_paro and sh.diario == [],
    u"⛔ con una referencia no canónica no se escribe nada en el Libro")
 
 # ── 8. Los dos pasos que NO se fingen ──────────────────────────────────────────────────────
-# ⛔ `analizar` es el paso del modelo: se niega en voz alta. Devolver sin hacer nada dejaría la
-#    bandera puesta y el expediente dado por analizado SIN análisis.
+# ⛔ `analizar` YA NO se niega siempre: desde el 30/09 le pregunta a Claude Code en local
+#    (`modelo.preguntar`), sobre la suscripción. El caso viejo exigía el plante incondicional y
+#    se puso rojo al implementarlo — y **el rojo tenía razón a medias**: lo que protegia no era
+#    negarse, era **no dar por analizado lo que no lo está**. Eso es lo que se vigila ahora.
+#    ⚠️ Se re-apunta en vez de borrarlo, y con su motivo escrito, para que nadie lo reponga.
+import modelo as _M
+
+
+def _falso_modelo(respuesta):
+    """Sustituye `modelo.preguntar` por uno que contesta lo que se le diga. Devuelve el original."""
+    _orig = _M.preguntar
+    _M.preguntar = lambda *a, **k: respuesta
+    return _orig
+
+
+# Con el modelo contestando bien, salen las columnas y la bandera.
+_orig = _falso_modelo({"ok": True, "datos": {
+    "resumen": u"Memoria técnica de la aviónica del cohete para EuRoC 2026.",
+    "etiquetas": [u"aviónica"], "severidad": "media",
+    "avisos": [u"Falta la fecha de publicación"]}})
 try:
-    S.Servicios(notion_get=_esq, sheets=Sheets({})).analizar(FILA)
-    _paro = False
-except SystemExit as e:
-    _paro = u"modelo" in str(e)
-ok(_paro, u"⛔ `analizar` debería negarse y decir por qué, no devolver sin hacer nada")
+    _cols = S.Servicios(notion_get=_esq, sheets=Sheets({})).analizar(FILA)
+    ok(_cols.get("analyzed") == "TRUE",
+       u"con un análisis entero, `analizar` debería marcar la bandera: %r" % (_cols,))
+    ok(_cols.get("executive_summary"), u"no devuelve el resumen ejecutivo: %r" % (_cols,))
+    ok("media" in (_cols.get("quality_issues") or ""),
+       u"la severidad no viaja normalizada: %r" % (_cols.get("quality_issues"),))
+finally:
+    _M.preguntar = _orig
+
+# ⛔⛔ Y SIN el análisis entero se planta, que es lo que el caso viejo defendía de verdad.
+for _resp, _que in (
+        ({"ok": False, "motivo": u"no encuentro Claude Code"}, u"el modelo no contesta"),
+        ({"ok": True, "datos": {"etiquetas": ["x"], "severidad": "baja"}}, u"sin resumen"),
+        ({"ok": True, "datos": {"resumen": u"Un resumen largo y con sentido de verdad.",
+                                "severidad": "CHUNGO"}}, u"sin severidad reconocible")):
+    _orig = _falso_modelo(_resp)
+    try:
+        S.Servicios(notion_get=_esq, sheets=Sheets({})).analizar(FILA)
+        _paro = False
+    except SystemExit:
+        _paro = True
+    finally:
+        _M.preguntar = _orig
+    ok(_paro, u"⛔⛔ `analizar` da por analizado un expediente %s: el revisor abriría la ficha "
+              u"sin resumen ni avisos, que es lo que tiene que leer antes de aprobar" % _que)
+
+# ⚠️ Y el doble se deshace: dejarlo puesto haría que todo lo de abajo midiera un modelo de
+#    mentira sin decirlo.
+ok(_M.preguntar is not None and _M.preguntar.__module__ == "modelo",
+   u"⛔ el doble de `modelo.preguntar` se quedó puesto: lo de abajo mediría mentira")
 
 # ⚠️ `cerrar` existe y está vacío a propósito: sin el método, el ejecutor diría que no existe y
 #    ningún expediente se cerraría nunca.
