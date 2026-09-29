@@ -193,8 +193,31 @@ sh = Sheets({"append": {"updates": {"updatedRange": "'Base de Datos'!A45:C45"}}}
 srv = S.Servicios(sheets=sh)
 d = srv.registrar({"reference": "Informe_S-4012_27", "drive_filename": "x.pdf",
                    "keywords": "informe, ensayo"})
-ok(d == {"base_database_row": "'Base de Datos'!A45:C45"},
-   u"`registrar` no devuelve dónde quedó la fila: %r" % (d,))
+# ⛔ UN NÚMERO, no el rango A1 que devuelve `append`. Medido en `SOLICITUDES`: las filas
+#    reales llevan ahí `169`, `171`, `172`. Y no es cosmética: `evidencias` usa esa columna como
+#    PRUEBA de que la fila del Libro se escribió.
+ok(d == {"base_database_row": 45},
+   u"`registrar` no devuelve el NÚMERO de fila: %r" % (d,))
+# Y si el Libro no dice dónde quedó, se para: sin prueba, la pasada siguiente lo registraría
+# otra vez y quedarían dos filas del mismo documento.
+try:
+    S.Servicios(sheets=Sheets({"append": {}})).registrar(
+        {"reference": "Informe_S-4012_27", "keywords": "x"})
+    _paro = False
+except SystemExit:
+    _paro = True
+ok(_paro, u"⛔ sin saber la fila debería pararse, no dar por registrado")
+ok(S.SA.fila_de_rango(u"'Base de Datos'!A45:C45") == 45, u"no saca la fila de un rango con comillas")
+ok(S.SA.fila_de_rango(u"SOLICITUDES!AW2") == 2, u"no saca la fila de un rango simple")
+# ⛔ Una pestaña con NÚMEROS en el nombre — y existen, `2026-27` sin ir más lejos. Sin este
+#    caso, coger «el primer número que aparezca» da lo mismo que coger la fila, y la
+#    mutación sale ciega: el fixture no podía plantear la pregunta.
+ok(S.SA.fila_de_rango(u"'2026-27'!A45:C45") == 45,
+   u"coge un número del NOMBRE de la pestaña en vez de la fila")
+ok(S.SA.fila_de_rango(u"'Base 2 de Datos'!B7") == 7,
+   u"…y lo mismo con un número suelto en medio del nombre")
+ok(S.SA.fila_de_rango(u"") is None and S.SA.fila_de_rango(None) is None,
+   u"un rango vacío no debe inventarse una fila")
 ok(sh.diario[0][0] == "append", u"no usa append")
 ok(sh.diario[0][1]["body"]["values"][0][0] == "Informe_S-4012_27",
    u"la fila del Libro no es la que construye `libro_datos`")

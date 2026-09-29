@@ -106,6 +106,19 @@ def rango(pestana, a1):
     return u"%s!%s" % (n, str(a1).strip())
 
 
+def fila_de_rango(rango):
+    """El número de fila de un rango que devuelve Sheets, o `None`.
+
+    ⛔ EXISTE POR UNA MEDICIÓN (696.ª, 29/09). `registrar` guardaba en `base_database_row` lo
+    que devuelve `append` — `'Base de Datos'!A45:C45` —, y las filas **reales** de
+    `SOLICITUDES` llevan ahí **un número**: `169`, `171`, `172`. Guardar otra cosa rompe a quien
+    lo lea esperando un número, y encima `evidencias` lo usa como PRUEBA de que la fila se
+    escribió: una prueba con el formato que no es se lee mal el día que alguien la mire.
+    """
+    m = re.search(r"![A-Z]+([0-9]+)", str(rango or ""))
+    return int(m.group(1)) if m else None
+
+
 def cuerpo_batch(pestana, celdas, modo=MODO_POR_DEFECTO):
     """`(cuerpo, motivos)` para `values.batchUpdate`. Con motivos, `cuerpo` es `None`.
 

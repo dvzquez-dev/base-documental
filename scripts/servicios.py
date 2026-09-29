@@ -235,7 +235,14 @@ class Servicios(object):
                      valueInputOption="USER_ENTERED",
                      body={"values": [celda]}).execute())
         donde = ((r.get("updates") or {}).get("updatedRange") or "")
-        return {"base_database_row": donde}
+        n = SA.fila_de_rango(donde)
+        if n is None:
+            raise SystemExit("el Libro no dijo en qué fila quedó (%r): sin eso no queda prueba "
+                             "de que se escribió, y la pasada siguiente lo registraría otra vez"
+                             % donde)
+        # ⛔ UN NÚMERO, que es lo que llevan las filas reales de `SOLICITUDES` (169, 171, 172),
+        #    no el rango A1 que devuelve `append`. Medido el 29/09.
+        return {"base_database_row": n}
 
     def cerrar(self, fila):
         """Paso 7: no hay nada que hacer **en el mundo** — el cierre es la bandera.
