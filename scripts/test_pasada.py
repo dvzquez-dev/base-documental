@@ -124,7 +124,10 @@ d = Doble()
 _rs, celdas, _av = PA.correr(
     [CAB, fila(PUB[:8] + [F] * 8 + [T, T, F])], d, aplicar=True, ahora=AHORA)
 puestas = [c for c, v in celdas if v == "TRUE"]
-ok(len(puestas) == 7, "publicar debería dejar 7 banderas y deja %d" % len(puestas))
+# ⛔ UNA, no siete: `servicios.publicar` sólo crea la página de Notion. Prometer las siete
+#    escribiría «PDF embebido» y «Drive verificado» sin que pasara nada, y `cierre` cerraría el
+#    expediente. Prometer de menos lo deja abierto y a la vista; de más lo entierra.
+ok(len(puestas) == 1, "publicar debería dejar 1 bandera y deja %d" % len(puestas))
 col_libro = PA.H.letra_columna(CAB.index("base_database_registered") + 1)
 ok(("%s2" % col_libro) not in dict(celdas),
    "publicar escribe el registro del Libro, que es del paso 6")

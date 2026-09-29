@@ -54,6 +54,14 @@ ACCIONES = (ANALIZAR, ESPERAR, PUBLICAR, REGISTRAR, CERRAR, REENVIO, NADA, REVIS
 #    número o copiar una fila es caro y, peor, irrepetible.
 CON_MODELO = (ANALIZAR,)
 
+# ⛔ Las banderas de publicación que **ningún servicio implementa todavía**: subir el fichero a
+#    Notion y embeberlo, y las cuatro de Drive. Están escritas aquí y no supuestas, porque lo
+#    contrario — dar por hecho lo que no se hace — es lo que entierra un expediente: con todas
+#    las banderas puestas, `cierre` lo da por publicado y lo cierra.
+SIN_IMPLEMENTAR = ("notion_pdf_embedded", "notion_embedding_verified", "drive_folder_created",
+                   "drive_primary_file_verified", "drive_summary_created",
+                   "domain_permission_verified")
+
 
 def siguiente(fila):
     """`(acción, por_qué)` para un expediente. Nunca lanza; una fila rara devuelve `REVISAR`.
@@ -111,6 +119,16 @@ def siguiente(fila):
         return ANOTAR, u"ya está hecho y sin marcar: %s" % u", ".join(anotables)
 
     faltan = [b for b in C.PUBLICACION if not C.es_si(fila.get(b))]
+
+    # ⛔ Lo que HOY no hace nadie: subir el fichero, embeberlo y todo el lado de Drive. Si la
+    #    página ya está creada y lo único que falta es eso, **no se vuelve a publicar** — eso
+    #    crearía una segunda página cada pasada — y **tampoco se da por hecho**. Se para y se
+    #    manda a mirar, que es lo único honesto mientras el adaptador no lo implemente.
+    _sin_manos = [b for b in faltan if b in SIN_IMPLEMENTAR]
+    if C.es_si(fila.get("notion_page_created")) and _sin_manos:
+        return REVISAR, (u"la página ya está creada y falta lo que aún no hace nadie: %s"
+                         % u", ".join(_sin_manos))
+
     if faltan == ["base_database_registered"]:
         return REGISTRAR, u"publicada y sin registrar en el Libro de Datos"
     if faltan:

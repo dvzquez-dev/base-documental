@@ -71,6 +71,20 @@ ok("notion_page_created" in por, "el por qué no dice qué se anota: %r" % por)
 a, _ = P.siguiente(sin(PUBLICADA, closed=F, notion_page_created=F, notion_page_id=""))
 ok(a == P.PUBLICAR, "sin identificador debería publicar de verdad; toca %r" % a)
 
+# ⛔⛔ LO QUE HOY NO HACE NADIE. Con la página ya creada y faltando el PDF o Drive, **no se
+#    vuelve a publicar** — crearía una segunda página cada pasada — y **tampoco se da por
+#    hecho**. Se para y se manda a mirar: es lo único honesto mientras no haya adaptador.
+_a_medias = sin(PUBLICADA, closed=F, notion_pdf_embedded=F, drive_folder_created=F)
+a, por = P.siguiente(_a_medias)
+ok(a == P.REVISAR, "con la página creada y el PDF sin subir debería ir a revisar; toca %r" % a)
+ok("no hace nadie" in por, "el por qué no dice que es algo sin implementar: %r" % por)
+ok("notion_pdf_embedded" in por, "el por qué no dice QUÉ falta: %r" % por)
+ok(a != P.PUBLICAR, "¡republica y crearía una segunda página!")
+ok(len(P.SIN_IMPLEMENTAR) == 6, "las banderas sin implementar deberían ser 6: %d"
+   % len(P.SIN_IMPLEMENTAR))
+ok("notion_page_created" not in P.SIN_IMPLEMENTAR,
+   "crear la página SÍ está implementado: meterlo aquí pararía todo desde el primer documento")
+
 # Y anotar va ANTES que registrar el Libro, aunque falten los dos.
 a, _ = P.siguiente(sin(PUBLICADA, closed=F, base_database_registered=F,
                        base_database_row="14"))

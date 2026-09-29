@@ -43,10 +43,15 @@ import pipeline as P
 #    acción nueva sin decidir qué la atiende falle en voz alta, en vez de no hacer nada callando.
 ATIENDE = {
     P.ANALIZAR: ("analizar", ("analyzed",)),
-    P.PUBLICAR: ("publicar", ("notion_page_created", "notion_pdf_embedded",
-                              "notion_embedding_verified", "drive_folder_created",
-                              "drive_primary_file_verified", "drive_summary_created",
-                              "domain_permission_verified")),
+    # ⛔⛔ SÓLO LA BANDERA QUE `servicios.publicar` HACE DE VERDAD (695.ª, 29/09).
+    #    Aquí prometía las SIETE de publicación y el adaptador sólo crea la página de Notion:
+    #    habría escrito «PDF embebido», «carpeta de Drive creada» y «permisos verificados» en
+    #    TRUE **sin que nada de eso hubiera pasado**. Y con las siete puestas, `cierre` daría el
+    #    expediente por publicado y lo cerraría: un documento **sin fichero en Drive**, marcado
+    #    como cerrado, que **nadie vuelve a mirar**.
+    #    ⚠️ Prometer de menos hace que el expediente se quede abierto y a la vista. Prometer de
+    #    más lo entierra. No son simétricos.
+    P.PUBLICAR: ("publicar", ("notion_page_created",)),
     P.REGISTRAR: ("registrar", ("base_database_registered",)),
     P.CERRAR: ("cerrar", ("closed",)),
 }

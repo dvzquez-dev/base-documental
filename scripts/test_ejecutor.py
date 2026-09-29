@@ -119,9 +119,15 @@ ok(P.ANALIZAR in E.ATIENDE and P.CERRAR in E.ATIENDE, "faltan acciones por atend
 for a, (_n, bs) in sorted(E.ATIENDE.items()):
     for b in bs:
         ok(b in C.BANDERAS, "la acción %r promete la bandera %r, que no está en la cabecera" % (a, b))
-ok(len(E.ATIENDE[P.PUBLICAR][1]) == 7,
-   "publicar debería dejar 7 banderas (las 8 de publicación menos el Libro): %d"
-   % len(E.ATIENDE[P.PUBLICAR][1]))
+# ⛔⛔ UNA SOLA: la que `servicios.publicar` hace de verdad. Aquí se exigían SIETE y el
+#    adaptador sólo crea la página de Notion — o sea que esta comprobación **fijaba la
+#    mentira**: habría escrito «PDF embebido» y «carpeta de Drive creada» sin que pasara nada,
+#    y con las siete puestas `cierre` habría dado el expediente por publicado y lo habría
+#    cerrado. Un documento sin fichero en Drive, marcado cerrado, que nadie vuelve a mirar.
+ok(E.ATIENDE[P.PUBLICAR][1] == ("notion_page_created",),
+   "publicar promete más banderas de las que hace: %r" % (E.ATIENDE[P.PUBLICAR][1],))
+ok(not set(E.ATIENDE[P.PUBLICAR][1]) & set(P.SIN_IMPLEMENTAR),
+   "publicar promete alguna de las que NADIE implementa todavía")
 ok("base_database_registered" not in E.ATIENDE[P.PUBLICAR][1],
    "publicar promete el registro en el Libro, que es del paso 6")
 
