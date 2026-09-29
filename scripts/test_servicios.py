@@ -19,6 +19,15 @@ for _f in (sys.stdout, sys.stderr):
 import notion_api as NA
 import servicios as S
 
+# ⛔⛔ EL ENTORNO SE FIJA AQUÍ, ANTES DE NADA. Este banco leía `DOMINIO_EQUIPO` de la máquina:
+#    verde con `uvigo.es` —lo que tenía exportado quien lo escribió— y **rojo con cualquier otro
+#    valor y rojo sin la variable**, o sea rojo en el CI y rojo en el portátil de Daniel. Un banco
+#    que depende del entorno de quien lo corre no mide el código: mide la máquina, y el día que se
+#    pone rojo manda a buscar un fallo que no existe.
+#    ⚠️ Va **antes de construir nada**, y el valor tiene que ser el mismo que devuelve el doble
+#       de permisos de Drive: si no coinciden, `permiso_dominio` se planta al releer.
+os.environ["DOMINIO_EQUIPO"] = "uvigo.es"
+
 fallos = []
 hechas = [0]
 
@@ -592,7 +601,6 @@ S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_su
 ok("update" not in [a for a, _ in dr.diario], "mueve algo sin haber fichero de origen")
 
 # ── Mover no es verificar, y compartir se relee ───────────────────────────────
-os.environ["DOMINIO_EQUIPO"] = "uvigo.es"
 _dr = Drive(meta={"name": "d.pdf", "size": "10", "parents": ["F-buena"]})
 ok(S.Servicios(notion_get=_esq, drive=_dr).verificar_en_carpeta("D-1", "F-buena") is True,
    "no ve el fichero que SÍ está en la carpeta")
@@ -656,8 +664,9 @@ try:
 except SystemExit as e:
     _paro = "DOMINIO_EQUIPO" in str(e)
 finally:
-    if _g is not None:
-        os.environ["DOMINIO_EQUIPO"] = _g
+    # ⚠️ Se restaura al valor DEL BANCO, no al de la máquina: si no, los casos de después
+    #    heredan lo que hubiera fuera y vuelven a medir el entorno.
+    os.environ["DOMINIO_EQUIPO"] = "uvigo.es"
 ok(_paro, "⛔ sin `DOMINIO_EQUIPO` debería pararse diciendo cuál falta")
 
 # ── El resumen ejecutivo, como fichero dentro de la carpeta ────────────
