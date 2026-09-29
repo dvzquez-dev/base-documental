@@ -191,6 +191,22 @@ d = Doble(valores=[CAB + ["closed"], fila() + [""]])
 txt, cod = CLI.correr(["--aplicar"], d, ahora=AHORA)
 ok(cod == 1, u"con avisos debería salir en 1, sale %d" % cod)
 
+# ── El repaso canta las filas DESPLAZADAS ────────────────────────
+# ⚠️ Escribir el detector y no llamarlo desde el repaso lo deja siendo una función que nadie
+#    ejecuta: la avería de «escrita entera, muerta en el cable de en medio».
+_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_CAB2 = ["request_id", "range_end", "annex_copied_count", "closed"]
+_lineas, _n = CLI.revisar_datos([_CAB2, ["SOL-9", "Es un informe bimensual", _MIME, "FALSE"]], [])
+ok(any(l.startswith("COLUMNA") for l in _lineas),
+   u"⛔ el repaso no canta una fila desplazada: %r" % (_lineas,))
+ok(any("annex_copied_count" in l for l in _lineas),
+   u"el aviso no dice en qué columna: %r" % (_lineas,))
+ok(any("SOL-9" in l for l in _lineas), u"el aviso no dice de qué expediente es")
+ok(_n == len(_lineas), u"el recuento y las líneas no cuadran")
+_lineas, _ = CLI.revisar_datos([_CAB2, ["SOL-8", "6499", "7", "FALSE"]], [])
+ok(not [l for l in _lineas if l.startswith("COLUMNA")],
+   u"canta sobre una fila sana: %r" % (_lineas,))
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

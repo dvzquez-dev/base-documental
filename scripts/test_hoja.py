@@ -145,6 +145,66 @@ for mala in (1, 0, -2, None, "x"):
 ok(H.celdas_de_cambios(["a"], 5, {}) == ([], []), "sin cambios no hay celdas ni motivos")
 ok(H.celdas_de_cambios(["a"], 5, None) == ([], []), "unos cambios None no deberían reventar")
 
+# ── FILAS DESPLAZADAS: la cabecera dice una cosa y la celda es de otra ────
+# ⛔⛔ Medido en `SOLICITUDES` el 29/09/2026: **4 de las 17 filas** —las cuatro ingeridas el
+#    09/07— llevan su cola **dos columnas a la izquierda**. El síntoma real: el tipo MIME
+#    (`application/vnd.…wordprocessingml.document`) aparece en `annex_copied_count`, que es un
+#    CONTADOR, y el texto libre de `context` aparece en `range_end`.
+# ⚠️ Hoy no hace daño **porque nadie lee esas columnas todavía**. El día que se implementen los
+#    anexos, `annex_copied_count` valdrá una cadena de 71 caracteres y no habrá ningún error:
+#    simplemente se copiarán cero anexos. Por eso se caza por el TIPO, no esperando a que reviente.
+_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_CAB = ["request_id", "range_start", "range_end", "annex_copied_count", "source_size_bytes"]
+_BUENA = ["SOL-1", "6301", "6499", "0", "415079"]
+# ⛔ Copiada de la fila 10 real (`SOL-DOC-20260709-141523-1A7F4NFG`): el texto de `context` cae
+#    en `range_end` y el tipo MIME en `annex_copied_count`. Dos síntomas, no tres: los demás
+#    huecos quedan **vacíos**, y el vacío no canta.
+_DESPL = ["SOL-2", "", "Es un informe bimensual, corres", _MIME, ""]
+
+_avisos = H.desplazadas(H.a_registros([_CAB, _BUENA])[0])
+ok(_avisos == [], u"una fila sana no debería dar avisos: %r" % (_avisos,))
+
+_avisos = H.desplazadas(H.a_registros([_CAB, _BUENA, _DESPL])[0])
+ok(len(_avisos) == 2, u"la fila desplazada tiene DOS celdas que no son números: %r" % (_avisos,))
+ok(all(a_[0] == 3 for a_ in _avisos),
+   u"el número de fila no es el de la hoja (cabecera + 1): %r" % (_avisos,))
+ok(all(a_[1] == "SOL-2" for a_ in _avisos), u"el aviso no dice de qué expediente es")
+_cols = sorted(a_[2] for a_ in _avisos)
+ok(_cols == ["annex_copied_count", "range_end"],
+   u"no señala las columnas que de verdad están mal: %r" % (_cols,))
+ok(any(_MIME[:30] in a_[3] for a_ in _avisos),
+   u"el aviso no enseña el valor, que es lo que deja ver el desplazamiento: %r" % (_avisos,))
+
+# ⚠️ Vacío NO es síntoma: la mayoría de las filas sanas tienen estas columnas en blanco, y
+#    cantar por eso enseñaría a ignorar el aviso (que es lo que lo mata).
+ok(H.desplazadas(H.a_registros([_CAB, ["SOL-3", "", "", "", ""]])[0]) == [],
+   u"⛔ canta por columnas VACÍAS: 13 de 17 filas reales las tienen así")
+ok(H.desplazadas(H.a_registros([_CAB, ["SOL-4", "  ", None, "", ""]])[0]) == [],
+   u"un blanco o un None tampoco son síntoma")
+# Un entero de verdad vale venga como texto o como número: Sheets devuelve las dos formas.
+ok(H.desplazadas([{"request_id": "x", "annex_copied_count": 7}]) == [],
+   u"un entero de verdad no debería cantar")
+ok(H.desplazadas([{"request_id": "x", "annex_copied_count": "7"}]) == [],
+   u"un entero en texto tampoco")
+# ⚠️ Y un decimal SÍ canta: `annex_copied_count` es un contador, no una medida.
+ok(len(H.desplazadas([{"request_id": "x", "annex_copied_count": "7.5"}])) == 1,
+   u"un 7.5 en un contador debería cantar")
+# Las columnas que no son numéricas se dejan en paz, aunque lleven cualquier cosa.
+ok(H.desplazadas([{"request_id": "x", "context": _MIME, "title_short": "42"}]) == [],
+   u"no debería opinar sobre columnas que no son numéricas")
+ok(H.desplazadas([]) == [] and H.desplazadas(None) == [], u"entradas vacías no revientan")
+# ⚠️ Y un elemento que no es un registro se salta, no revienta: una lectura a medias de la
+#    hoja mete cadenas sueltas, y reventar ahí dejaría el repaso entero sin contestar.
+ok(H.desplazadas(["chusta", None, {"request_id": "x", "range_end": "no soy un numero"}]) ==
+   [(4, "x", "range_end", "no soy un numero")],
+   u"no se salta lo que no es un registro: %r"
+   % (H.desplazadas(["chusta", None, {"request_id": "x", "range_end": "no"}]),))
+# ⛔ Y la lista de columnas numéricas es la medida, no una corazonada.
+ok("annex_copied_count" in H.COLUMNAS_ENTERAS and "range_end" in H.COLUMNAS_ENTERAS,
+   u"faltan las columnas donde se vio el desplazamiento real")
+ok("closed" not in H.COLUMNAS_ENTERAS,
+   u"una bandera no es un número: meterla aquí pondría roja media hoja")
+
 print("%d comprobaciones" % hechas[0])
 if fallos:
     print("\n%d ROJO(S):" % len(fallos))

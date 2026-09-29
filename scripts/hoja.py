@@ -107,6 +107,47 @@ def a_registros(valores):
     return [a_registro(cabecera, f) for f in valores[1:]], duplicadas
 
 
+# ⛔⛔ Las columnas que **son números enteros**. No es una corazonada: es lo que permite cazar una
+#    fila DESPLAZADA. Medido en `SOLICITUDES` el 29/09/2026 — **4 de 17 filas**, las cuatro
+#    ingeridas el 09/07, llevan su cola **dos columnas a la izquierda**, así que el tipo MIME cae
+#    en `annex_copied_count` (un contador) y el texto libre de `context` cae en `range_end`.
+#    ⚠️ Hoy no revienta nada **porque nadie lee esas columnas todavía**. El día que se
+#    implementen los anexos, `annex_copied_count` valdrá una cadena de 71 caracteres y se
+#    copiarán **cero anexos sin un solo error**. Por eso se caza por el tipo y no por el síntoma.
+#    ⛔ Aquí NO van las banderas (`closed`, `approved`…): valen `TRUE`/`FALSE`, y meterlas
+#       pondría roja media hoja por hacer lo correcto.
+COLUMNAS_ENTERAS = ("form_row", "reserved_id", "range_start", "range_end",
+                    "annex_copied_count", "source_size_bytes", "base_database_row",
+                    "retry_count", "reminder_count", "partial_alert_count")
+
+
+def desplazadas(registros):
+    """Celdas numéricas que no llevan un número. Lista de `(fila_1based, request_id, col, valor)`.
+
+    ⚠️ Una celda **vacía no es síntoma**: 13 de las 17 filas reales tienen estas columnas en
+    blanco, y cantar por eso enseña a ignorar el aviso — que es lo que de verdad lo mata.
+    """
+    avisos = []
+    for i, r in enumerate(registros or []):
+        if not isinstance(r, dict):
+            continue
+        rid = str(r.get("request_id") or "").strip() or u"(sin request_id)"
+        for col in COLUMNAS_ENTERAS:
+            # ⚠️ Sin `if col not in r`: `r.get(col)` ya devuelve `None` para la que no está, y
+            #    `None` sale por el vacío de dos líneas más abajo. La guarda **no se podía
+            #    observar** — su mutación salió ciega—, y una guarda que no cambia nada sólo
+            #    enseña a confiar en guardas que no hacen nada.
+            crudo = r.get(col)
+            txt = u"" if crudo is None else str(crudo).strip()
+            if not txt:
+                continue
+            try:
+                int(txt)
+            except (TypeError, ValueError):
+                avisos.append((i + 2, rid, col, txt[:60]))
+    return avisos
+
+
 def celdas_de_cambios(cabecera, n_fila, cambios):
     """`(celdas, motivos)` para escribir. `celdas` es `[(A1, valor)]`.
 

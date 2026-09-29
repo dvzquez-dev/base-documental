@@ -98,6 +98,12 @@ def revisar_datos(valores_solicitudes, filas_libro):
         lineas.append(u"CABECERA  la columna %r sale %d veces: no se puede escribir en ella"
                       % (nombre, len(duplicadas[nombre])))
 
+    # ⛔ Las filas DESPLAZADAS van primero: si la cola de una fila está corrida, todo lo que
+    #    se diga de ella después se ha leído de la columna equivocada.
+    for nf, rid, col, valor in H.desplazadas(registros):
+        lineas.append(u"COLUMNA   fila %d %s — `%s` debería ser un número y vale %r: la fila "
+                      u"parece desplazada respecto a la cabecera" % (nf, rid, col, valor))
+
     for n, rid, que in C.revisar(registros):
         lineas.append(u"CIERRE    fila %d %s — %s" % (n, rid, que))
 
