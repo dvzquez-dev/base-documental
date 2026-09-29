@@ -110,6 +110,10 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+
+# La puerta unica de DOCX->PDF y su verificacion. Ver el docstring de `pdf.py`.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pdf as _PDF
 from datetime import datetime, timezone
 
 try:
@@ -747,20 +751,18 @@ def patch_docx_reference(docx_bytes, correct_reference):
 
 
 def convert_docx_to_pdf(docx_bytes, workdir):
-    docx_path = os.path.join(workdir, "input.docx")
-    with open(docx_path, "wb") as f:
-        f.write(docx_bytes)
-    result = subprocess.run(
-        ["soffice", "--headless", "--convert-to", "pdf", "--outdir", workdir, docx_path],
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"LibreOffice fallo: {result.stdout}\n{result.stderr}")
-    pdf_path = os.path.join(workdir, "input.pdf")
-    with open(pdf_path, "rb") as f:
-        return f.read()
+    """⛔ El cuerpo vive en `pdf.docx_a_pdf` desde el 30/09, y NO es un refactor cosmético: el
+    pipeline nuevo necesita exactamente esto, y tenerlo dos veces es la avería que Daniel cortó
+    ese día — *«ni se te ocurra andar repitiendo código en lugar de reutilizarlo»*. Dos copias de
+    un criterio no dan ningún síntoma hasta el día que una cambia.
+
+    ⚠️ Aquí se **conserva el `raise`**: este script procesa un documento por ejecución y su
+    llamante caza `RuntimeError`. El pipeline recorre decenas, así que allí se leen los motivos.
+    """
+    datos, motivos = _PDF.docx_a_pdf(docx_bytes, workdir)
+    if datos is None:
+        raise RuntimeError("LibreOffice fallo: " + " | ".join(motivos))
+    return datos
 
 
 def pdf_contiene_referencia(pdf_bytes, reference, workdir):
@@ -770,20 +772,12 @@ def pdf_contiene_referencia(pdf_bytes, reference, workdir):
       True  -> verificado, la referencia está en el PDF;
       False -> verificado, la referencia NO está (no dar por resuelto);
       None  -> no se pudo verificar (pdftotext no instalado o falló) — el llamante
-               mantiene el comportamiento antiguo pero lo deja anotado."""
-    pdf_path = os.path.join(workdir, "verify.pdf")
-    with open(pdf_path, "wb") as f:
-        f.write(pdf_bytes)
-    try:
-        result = subprocess.run(
-            ["pdftotext", pdf_path, "-"],
-            capture_output=True, text=True, timeout=120,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    return reference in result.stdout
+               mantiene el comportamiento antiguo pero lo deja anotado.
+
+    ⛔ El cuerpo vive en `pdf.pdf_lleva` desde el 30/09, por lo mismo que `convert_docx_to_pdf`:
+    el pipeline nuevo lo necesita y dos copias del mismo criterio divergen sin dar síntoma.
+    ⚠️ Los tres valores se conservan tal cual, que es lo que este docstring ya defendía."""
+    return _PDF.pdf_lleva(pdf_bytes, reference, workdir)
 
 
 def update_drive_file_content(drive, file_id, new_bytes, mime_type):
