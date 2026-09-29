@@ -16,10 +16,37 @@ for _f in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+import notion_api as NA
 import servicios as S
 
 fallos = []
 hechas = [0]
+
+
+# ⛔⛔ LA PUERTA DE LECTURA DE NOTION, DOBLADA PARA TODO EL BANCO. Lo cantó el propio banco:
+#    al hacer que `publicar` pidiera las opciones de «Etiquetas», empezó a pedir `NOTION_TOKEN`
+#    — o sea que iba a hablar con Notion **de verdad**, que es lo único que un banco no puede
+#    hacer. Es la **segunda vez** con esta forma: una llamada nueva dentro de un método ya
+#    probado se lleva por delante los dobles de los casos de al lado.
+#    ⚠️ Se sustituye **antes** de construir nada (`Servicios.__init__` resuelve
+#       `notion_get or http_notion_get` al construirse) y **apunta en vez de lanzar**:
+#       `opciones_etiquetas` se traga cualquier excepción a propósito —Notion caído no puede
+#       impedir publicar—, así que un doble que lanzara saldría **verde igual**. Lo que lo
+#       delata es el recuento, comprobado al final del fichero.
+_intentos_red = []
+
+
+def _sin_red(url, token=None):
+    _intentos_red.append(url)
+    return {}
+
+
+S.http_notion_get = _sin_red
+
+
+def _esq(url, token=None):
+    """El esquema de «Etiquetas», doblado: vacío."""
+    return {}
 
 
 def ok(cond, que):
@@ -103,7 +130,7 @@ ok("readonly" not in " ".join(S.ALCANCES),
 
 # ── 3. Leer ────────────────────────────────────────────────────────────────────────────────
 sh = Sheets({"get": {"values": [["request_id"], ["R-1"]]}})
-srv = S.Servicios(sheets=sh)
+srv = S.Servicios(notion_get=_esq, sheets=sh)
 ok(srv.leer() == [["request_id"], ["R-1"]], u"`leer` no devuelve los valores crudos")
 ok(sh.diario[0][1]["range"] == "SOLICITUDES!A1:BZ",
    u"`leer` no pide el rango medido: %r" % (sh.diario[0][1],))
@@ -112,7 +139,7 @@ ok(sh.diario[0][1]["spreadsheetId"] == S.HOJA_SOLICITUDES, u"`leer` pide otra ho
 # ⛔ El Libro se pide CON LA PESTAÑA ENTRECOMILLADA: «Base de Datos» lleva espacios y sin
 #    comillas el rango no es válido — la lectura se pierde entera.
 sh = Sheets({"get": {"values": [["Título", "Ubic", "Claves"], ["Informe_S-1_27", "x", "y"]]}})
-srv = S.Servicios(sheets=sh)
+srv = S.Servicios(notion_get=_esq, sheets=sh)
 filas = srv.leer_libro()
 ok(filas == [["Informe_S-1_27", "x", "y"]],
    u"`leer_libro` no quita la cabecera (es lo que espera `libro_datos`): %r" % (filas,))
@@ -121,23 +148,23 @@ ok(sh.diario[0][1]["range"].startswith(u"'Base de Datos'!"),
 
 # ── 4. Releer ──────────────────────────────────────────────────────────────────────────────
 sh = Sheets({"batchGet": {"valueRanges": [{"values": [["TRUE"]]}, {"values": [[""]]}]}})
-srv = S.Servicios(sheets=sh)
+srv = S.Servicios(notion_get=_esq, sheets=sh)
 leidas = srv.releer(["AW2", "BX2"])
 ok(leidas == {"AW2": "TRUE", "BX2": ""}, u"`releer` no devuelve el mapa esperado: %r" % (leidas,))
 ok(sh.diario[0][1]["ranges"] == ["SOLICITUDES!AW2", "SOLICITUDES!BX2"],
    u"`releer` no pide los rangos de esas celdas: %r" % (sh.diario[0][1],))
 # Sin claves no se molesta a nadie.
 sh = Sheets({})
-ok(S.Servicios(sheets=sh).releer([]) == {} and sh.diario == [],
+ok(S.Servicios(notion_get=_esq, sheets=sh).releer([]) == {} and sh.diario == [],
    u"releer sin claves no debería llamar al mundo")
 # Una celda inválida no se pide: `sheets_api` ya dijo que no es una celda de datos.
 sh = Sheets({"batchGet": {"valueRanges": [{"values": [["x"]]}]}})
-S.Servicios(sheets=sh).releer(["A1"])
+S.Servicios(notion_get=_esq, sheets=sh).releer(["A1"])
 ok(sh.diario == [], u"⛔ se pide releer la CABECERA: `A1` no es una celda de datos")
 
 # ── 5. Escribir ────────────────────────────────────────────────────────────────────────────
 sh = Sheets({})
-S.Servicios(sheets=sh).escribir([("AW2", "TRUE")])
+S.Servicios(notion_get=_esq, sheets=sh).escribir([("AW2", "TRUE")])
 ok(sh.diario[0][0] == "batchUpdate", u"`escribir` no usa batchUpdate")
 cuerpo = sh.diario[0][1]["body"]
 ok(cuerpo["valueInputOption"] == "USER_ENTERED",
@@ -148,7 +175,7 @@ ok(cuerpo["data"][0]["range"] == "SOLICITUDES!AW2", u"el rango no es el esperado
 # ⛔ Y si el cuerpo no se puede construir, NO se llama a nadie.
 sh = Sheets({})
 try:
-    S.Servicios(sheets=sh).escribir([("A:A", "x")])
+    S.Servicios(notion_get=_esq, sheets=sh).escribir([("A:A", "x")])
     _paro = False
 except SystemExit:
     _paro = True
@@ -238,7 +265,7 @@ def _notion_ok(url, cuerpo, token=None):
     return {"id": "1a2b3c", "url": "https://notion/x"}
 
 
-srv = S.Servicios(sheets=Sheets({}), notion=_notion_ok)
+srv = S.Servicios(notion_get=_esq, sheets=Sheets({}), notion=_notion_ok)
 devuelto = srv.publicar(FILA)
 ok(devuelto == {"notion_page_id": "1a2b3c", "notion_page_url": "https://notion/x"},
    u"⛔ `publicar` no devuelve el id: sin él, si falla anotar la bandera la pasada siguiente "
@@ -247,7 +274,7 @@ ok(_pedidos and _pedidos[0][0] == S.NOTION_CREAR, u"no llama al endpoint de crea
 ok(_pedidos[0][1]["parent"]["data_source_id"] == "ds-1", u"no manda la base correcta")
 
 # ⛔ Si Notion no devuelve id, se para: no se puede anotar que existe.
-srv = S.Servicios(sheets=Sheets({}), notion=lambda u, c, token=None: {"url": "x"})
+srv = S.Servicios(notion_get=_esq, sheets=Sheets({}), notion=lambda u, c, token=None: {"url": "x"})
 try:
     srv.publicar(FILA)
     _paro = False
@@ -257,7 +284,7 @@ ok(_paro, u"⛔ sin id de vuelta debería pararse y decirlo")
 
 # Un expediente incompleto no llega a llamar a Notion.
 _pedidos2 = []
-srv = S.Servicios(sheets=Sheets({}),
+srv = S.Servicios(notion_get=_esq, sheets=Sheets({}),
                   notion=lambda u, c, token=None: _pedidos2.append(1) or {"id": "x"})
 try:
     srv.publicar(dict(FILA, unit_key="inventada"))
@@ -267,7 +294,7 @@ ok(_pedidos2 == [], u"⛔ se llamó a Notion con un expediente que no se puede p
 
 # ── 7. Registrar en el Libro ───────────────────────────────────────────────────────────────
 sh = Sheets({"append": {"updates": {"updatedRange": "'Base de Datos'!A45:C45"}}})
-srv = S.Servicios(sheets=sh)
+srv = S.Servicios(notion_get=_esq, sheets=sh)
 d = srv.registrar({"reference": "Informe_S-4012_27", "drive_filename": "x.pdf",
                    "keywords": "informe, ensayo"})
 # ⛔ UN NÚMERO, no el rango A1 que devuelve `append`. Medido en `SOLICITUDES`: las filas
@@ -278,7 +305,7 @@ ok(d == {"base_database_row": 45},
 # Y si el Libro no dice dónde quedó, se para: sin prueba, la pasada siguiente lo registraría
 # otra vez y quedarían dos filas del mismo documento.
 try:
-    S.Servicios(sheets=Sheets({"append": {}})).registrar(
+    S.Servicios(notion_get=_esq, sheets=Sheets({"append": {}})).registrar(
         {"reference": "Informe_S-4012_27", "keywords": "x"})
     _paro = False
 except SystemExit:
@@ -302,7 +329,7 @@ ok(sh.diario[0][1]["spreadsheetId"] == S.HOJA_LIBRO, u"registra en la hoja equiv
 
 sh = Sheets({})
 try:
-    S.Servicios(sheets=sh).registrar({"reference": "chusta"})
+    S.Servicios(notion_get=_esq, sheets=sh).registrar({"reference": "chusta"})
     _paro = False
 except SystemExit:
     _paro = True
@@ -313,7 +340,7 @@ ok(_paro and sh.diario == [],
 # ⛔ `analizar` es el paso del modelo: se niega en voz alta. Devolver sin hacer nada dejaría la
 #    bandera puesta y el expediente dado por analizado SIN análisis.
 try:
-    S.Servicios(sheets=Sheets({})).analizar(FILA)
+    S.Servicios(notion_get=_esq, sheets=Sheets({})).analizar(FILA)
     _paro = False
 except SystemExit as e:
     _paro = u"modelo" in str(e)
@@ -321,7 +348,7 @@ ok(_paro, u"⛔ `analizar` debería negarse y decir por qué, no devolver sin ha
 
 # ⚠️ `cerrar` existe y está vacío a propósito: sin el método, el ejecutor diría que no existe y
 #    ningún expediente se cerraría nunca.
-ok(S.Servicios(sheets=Sheets({})).cerrar(FILA) == {},
+ok(S.Servicios(notion_get=_esq, sheets=Sheets({})).cerrar(FILA) == {},
    u"`cerrar` debería existir y no hacer nada en el mundo: el cierre ES la bandera")
 
 # ── 9. Sin credenciales se para, y se dice ─────────────────────────────────────────────────
@@ -343,7 +370,7 @@ ok(_paro, u"⛔ sin `GDRIVE_SA_KEY` debería pararse diciendo cuál falta, no re
 _sin_carpeta = dict(FILA)
 _sin_carpeta.pop("drive_folder_id")
 dr = Drive()
-srv = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok, drive=dr)
+srv = S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok, drive=dr)
 _dev = srv.publicar(_sin_carpeta)
 ok(dr.diario and dr.diario[0][0] == "create", u"no crea la carpeta del expediente")
 _cuerpo = dr.diario[0][1]["body"]
@@ -364,7 +391,7 @@ ok(_dev.get("notion_page_id") == "1a2b3c", u"no devuelve también el id de la p�
 #    siempre devolvía un id.
 _ped3 = []
 try:
-    S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
+    S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
                 notion=lambda u, c, token=None: _ped3.append(1) or {"id": "x"},
                 drive=Drive({})).publicar(_sin_carpeta)
     _paro = False
@@ -376,7 +403,7 @@ ok(_ped3 == [], u"⛔ …y no llegar a crear la página de Notion")
 # ⚠️ Con la carpeta ya creada NO se crea otra: dos carpetas con el mismo nombre y nadie sabe
 #    cuál es la buena.
 dr = Drive()
-S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
+S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
             drive=dr).publicar(FILA)
 ok(dr.diario == [], u"⛔ crea una SEGUNDA carpeta teniendo ya `drive_folder_id`")
 
@@ -384,7 +411,7 @@ ok(dr.diario == [], u"⛔ crea una SEGUNDA carpeta teniendo ya `drive_folder_id`
 dr = Drive()
 _ped = []
 try:
-    S.Servicios(sheets=Sheets({"get": {"values": [RUTAS_VALORES[0]]}}),
+    S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": [RUTAS_VALORES[0]]}}),
                 notion=lambda u, c, token=None: _ped.append(1) or {"id": "x"},
                 drive=dr).publicar(_sin_carpeta)
     _paro = False
@@ -451,7 +478,7 @@ ok("get_media" not in [d[0] for d in dr.diario],
 for _hueco in ({"id": "up-1"}, {"upload_url": "u"}, {}):
     _dr = Drive()
     try:
-        S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
+        S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
                     notion=lambda u, c, token=None, _h=_hueco: (
                         _h if u.endswith("/file_uploads") else {"id": "p"}),
                     drive=_dr, subir=_subir_ok).publicar(_CON_FICHERO)
@@ -465,7 +492,7 @@ for _hueco in ({"id": "up-1"}, {"upload_url": "u"}, {}):
 # ⛔ Si la subida no termina, no se crea la página.
 _ped2 = []
 try:
-    S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
+    S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES}}),
                 notion=lambda u, c, token=None: (_ped2.append(u) or
                                                  ({"id": "up", "upload_url": "u"}
                                                   if u.endswith("/file_uploads")
@@ -530,7 +557,7 @@ ok(_upd[0].get("supportsAllDrives") is True, "sin supportsAllDrives fallaría en
 for _f, _c in ((_CON_FICHERO, ""), (FILA, "F-x"), ({}, "")):
     _dr = Drive()
     try:
-        S.Servicios(drive=_dr).mover_a_carpeta(_f, _c)
+        S.Servicios(notion_get=_esq, drive=_dr).mover_a_carpeta(_f, _c)
         _paro = False
     except SystemExit:
         _paro = True
@@ -547,11 +574,11 @@ ok("update" not in [a for a, _ in dr.diario], "mueve algo sin haber fichero de o
 # ── Mover no es verificar, y compartir se relee ───────────────────────────────
 os.environ["DOMINIO_EQUIPO"] = "uvigo.es"
 _dr = Drive(meta={"name": "d.pdf", "size": "10", "parents": ["F-buena"]})
-ok(S.Servicios(drive=_dr).verificar_en_carpeta("D-1", "F-buena") is True,
+ok(S.Servicios(notion_get=_esq, drive=_dr).verificar_en_carpeta("D-1", "F-buena") is True,
    "no ve el fichero que SÍ está en la carpeta")
-ok(S.Servicios(drive=_dr).verificar_en_carpeta("D-1", "F-otra") is False,
+ok(S.Servicios(notion_get=_esq, drive=_dr).verificar_en_carpeta("D-1", "F-otra") is False,
    "⛔ da por archivado un fichero que está en OTRA carpeta")
-ok(S.Servicios(drive=_dr).verificar_en_carpeta("", "F-buena") is False, "sin fichero no verifica")
+ok(S.Servicios(notion_get=_esq, drive=_dr).verificar_en_carpeta("", "F-buena") is False, "sin fichero no verifica")
 
 # ⛔ Si tras mover no consta en la carpeta, no se da por archivado.
 class _NoMueve(Drive):
@@ -583,7 +610,7 @@ ok("perm_create" in [a for a, _ in _dr.diario],
 
 # ── El permiso de dominio se CREA y se RELEE ───────────────────────────────
 _dr = Drive()
-ok(S.Servicios(drive=_dr).permiso_dominio("D-1") is True, "no comparte con el dominio")
+ok(S.Servicios(notion_get=_esq, drive=_dr).permiso_dominio("D-1") is True, "no comparte con el dominio")
 _pc = [k for a, k in _dr.diario if a == "perm_create"][0]
 ok(_pc["body"] == {"type": "domain", "role": "reader", "domain": "uvigo.es"},
    "el permiso no es de lectura para el dominio: %r" % (_pc.get("body"),))
@@ -595,7 +622,7 @@ ok("perm_list" in [a for a, _ in _dr.diario],
 # ⛔ Si el permiso no consta tras crearlo, se dice: el equipo no podría abrir el documento.
 _dr = Drive(dominio="otro.es")
 try:
-    S.Servicios(drive=_dr).permiso_dominio("D-1")
+    S.Servicios(notion_get=_esq, drive=_dr).permiso_dominio("D-1")
     _paro = False
 except SystemExit as e:
     _paro = "no consta" in str(e)
@@ -604,7 +631,7 @@ ok(_paro, "⛔ el permiso no quedó y se dio por bueno")
 # Sin dominio configurado se para: compartir con "" no comparte con nadie.
 _g = os.environ.pop("DOMINIO_EQUIPO", None)
 try:
-    S.Servicios(drive=Drive()).permiso_dominio("D-1")
+    S.Servicios(notion_get=_esq, drive=Drive()).permiso_dominio("D-1")
     _paro = False
 except SystemExit as e:
     _paro = "DOMINIO_EQUIPO" in str(e)
@@ -618,7 +645,7 @@ ok(_paro, "⛔ sin `DOMINIO_EQUIPO` debería pararse diciendo cuál falta")
 #    archiva. Lo que se prueba es que no se invente, que no se escriba vacío y que no se duplique.
 _RES = u"El informe recoge el ensayo estático del 12/09 con tres anomalías."
 _dr = Drive()
-_d = S.Servicios(drive=_dr, medio=_Medio).crear_resumen(dict(FILA, executive_summary=_RES), "F-exp")
+_d = S.Servicios(notion_get=_esq, drive=_dr, medio=_Medio).crear_resumen(dict(FILA, executive_summary=_RES), "F-exp")
 _cr = [k for a_, k in _dr.diario if a_ == "create"]
 ok(len(_cr) == 1, u"no crea el fichero del resumen: %r" % (_dr.diario,))
 ok(_cr and _cr[0]["body"]["parents"] == ["F-exp"],
@@ -643,17 +670,17 @@ ok(_bytes.decode("utf-8") == _RES,
 # ⛔ SIN resumen NO se crea un fichero vacío: quien lo abra creería que ya está mirado.
 for _vacio in (u"", u"   ", None):
     _dr = Drive()
-    _d = S.Servicios(drive=_dr, medio=_Medio).crear_resumen(dict(FILA, executive_summary=_vacio), "F-exp")
+    _d = S.Servicios(notion_get=_esq, drive=_dr, medio=_Medio).crear_resumen(dict(FILA, executive_summary=_vacio), "F-exp")
     ok(_d == {} and _dr.diario == [],
        u"⛔ con `executive_summary`=%r crea un fichero de resumen VACÍO" % (_vacio,))
 # Sin carpeta tampoco: colgaría de la raíz de Drive.
 _dr = Drive()
-ok(S.Servicios(drive=_dr, medio=_Medio).crear_resumen(dict(FILA, executive_summary=_RES), "") == {}
+ok(S.Servicios(notion_get=_esq, drive=_dr, medio=_Medio).crear_resumen(dict(FILA, executive_summary=_RES), "") == {}
    and _dr.diario == [], u"⛔ sin carpeta el resumen colgaría de la raíz de Drive")
 
 # ⛔ Si Drive no devuelve el id, se para: sin él la pasada siguiente crearía un segundo resumen.
 try:
-    S.Servicios(drive=Drive({}), medio=_Medio).crear_resumen(dict(FILA, executive_summary=_RES), "F-exp")
+    S.Servicios(notion_get=_esq, drive=Drive({}), medio=_Medio).crear_resumen(dict(FILA, executive_summary=_RES), "F-exp")
     _paro = False
 except SystemExit as e:
     _paro = "resumen" in str(e)
@@ -662,7 +689,7 @@ ok(_paro, u"⛔ Drive sin devolver id debería pararse y decirlo")
 # ── Y `publicar` lo usa ───────────────────────────────────────────
 # ⚠️ Probar el método suelto deja CIEGA la línea que lo llama: ya pasó con `verificar_en_carpeta`.
 _dr = Drive()
-_d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
+_d = S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
                  drive=_dr, medio=_Medio).publicar(dict(FILA, executive_summary=_RES))
 ok(_d.get("drive_summary_file_id") == "F-nueva",
    u"⛔ `publicar` no archiva el resumen ejecutivo: %r" % (_d,))
@@ -676,11 +703,89 @@ ok("source_drive_file_id" not in FILA or not FILA.get("source_drive_file_id"),
 
 # ⚠️ Con el resumen ya archivado no se crea un segundo.
 _dr = Drive()
-_d = S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
+_d = S.Servicios(notion_get=_esq, sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_ok,
                  drive=_dr, medio=_Medio).publicar(dict(FILA, executive_summary=_RES,
                                           drive_summary_file_id="F-ya"))
 ok([k for a_, k in _dr.diario if a_ == "create"] == [],
    u"⛔ crea un SEGUNDO resumen teniendo ya `drive_summary_file_id`")
+
+# ── LA VERSIÓN DE LA API Y LA FORMA DEL CUERPO TIENEN QUE CUADRAR ─────
+# ⛔⛔ `notion_api.cuerpo_pagina` manda `parent = {"type": "data_source_id", …}`, que es la
+#    forma de las bases **multi-fuente**; esa forma **no existe** en `2022-06-28`, donde el
+#    padre es `database_id`. Con las dos en desacuerdo, el primer documento que se publique se
+#    va con un **400** — y no había dónde notarlo, porque el cuerpo se construye en un módulo
+#    y la cabecera se pone en otro. Este caso lee **las dos cosas a la vez**.
+# ⚠️ `scripts/sync-notion.mjs` se queda en `2022-06-28` a propósito: consulta
+#    `/v1/databases/{id}/query`, que es de esa época. Dos clientes, dos trabajos.
+_c, _ = NA.cuerpo_pagina("ds-1", {"Título": u"x"})
+ok(_c["parent"]["type"] == "data_source_id",
+   u"si el padre deja de ser `data_source_id`, esta comprobación cambia de tema: %r"
+   % (_c["parent"],))
+ok(S.NOTION_VERSION >= "2025-09-03",
+   u"⛔ el cuerpo usa `data_source_id` y la cabecera dice %r: el primer documento que se "
+   u"publique se va con un 400" % (S.NOTION_VERSION,))
+ok("2022-06-28" < "2025-09-03" < "2026-01-01",
+   u"la comparación de versiones por texto no ordena: hace falta otra forma")
+
+# ── LAS OPCIONES QUE YA EXISTEN, PARA NO DUPLICARLAS ──────────────
+# ⛔⛔ `casar_etiquetas` sabe reusar la opción que ya hay ignorando caja y tildes —medido:
+#    **7 de 48** etiquetas del modelo duplicaban una existente así—, pero sólo si alguien le
+#    pasa la lista. `publicar` no se la pasaba: la máquina entera estaba **escrita y muerta**,
+#    y cada `Python` habría creado una opción al lado de `python` en una propiedad que ya
+#    tiene **183**.
+_ESQUEMA = {"properties": {"Etiquetas": {"type": "multi_select", "multi_select": {
+    "options": [{"name": u"python"}, {"name": u"informe"}, {"name": u"simulacion"}]}}}}
+_leidas = []
+
+
+def _get_esquema(url, token=None):
+    _leidas.append(url)
+    return _ESQUEMA
+
+
+_srv = S.Servicios(notion_get=_get_esquema)
+ok(_srv.opciones_etiquetas("ds-1") == [u"python", u"informe", u"simulacion"],
+   u"no saca las opciones que ya tiene «Etiquetas»: %r" % (_srv.opciones_etiquetas("ds-1"),))
+ok(_leidas and "ds-1" in _leidas[0] and "data_sources" in _leidas[0],
+   u"no pide el esquema de la fuente de datos: %r" % (_leidas,))
+# ⚠️ Se pide UNA vez: una pasada de 40 expedientes no puede leer el esquema 40 veces.
+_antes = len(_leidas)
+_srv.opciones_etiquetas("ds-1")
+ok(len(_leidas) == _antes, u"⚠️ relee el esquema en cada llamada: %d lecturas" % len(_leidas))
+
+
+def _get_revienta(url, token=None):
+    raise RuntimeError("Notion no contesta")
+
+
+ok(S.Servicios(notion_get=_get_revienta).opciones_etiquetas("ds-1") == [],
+   u"⛔ un fallo leyendo el esquema no debe impedir publicar")
+ok(S.Servicios(notion_get=lambda u, token=None: {}).opciones_etiquetas("ds-1") == [],
+   u"un esquema sin propiedades debería dar lista vacía, no reventar")
+ok(S.Servicios(notion_get=_get_esquema).opciones_etiquetas("") == [],
+   u"sin id de fuente no hay a quién preguntar")
+
+# ⚠️ Y `publicar` se las PASA: probar el método suelto deja ciega la línea que lo llama.
+_ped_etq = []
+
+
+def _notion_mira(url, cuerpo, token=None):
+    _ped_etq.append(cuerpo)
+    return {"id": "p-1", "url": "https://notion/x"}
+
+
+S.Servicios(sheets=Sheets({"get": {"values": RUTAS_VALORES}}), notion=_notion_mira,
+            notion_get=_get_esquema, drive=Drive()).publicar(
+                dict(FILA, tags_json=u'["Python","CFD"]'))
+_etq = [x["name"] for x in _ped_etq[0]["properties"]["Etiquetas"]["multi_select"]]
+ok(_etq == [u"python", u"CFD"],
+   u"⛔ `publicar` no casa las etiquetas con las opciones que ya hay: %r" % (_etq,))
+
+# ⛔⛔ Y LO ÚLTIMO: que el banco no haya intentado hablar con Notion ni una vez. Va al final
+#    porque tiene que ver **todas** las llamadas, y es lo que impide que la próxima vez que
+#    alguien meta una lectura dentro de un método ya probado, el banco se vaya a la red callando.
+ok(_intentos_red == [], u"⛔ el banco ha intentado LEER de Notion %d vez/veces: %r"
+   % (len(_intentos_red), _intentos_red[:3]))
 
 print("%d comprobaciones" % hechas[0])
 if fallos:

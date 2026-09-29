@@ -60,9 +60,21 @@ PESTANA_SOLICITUDES = "SOLICITUDES"
 RANGO_SOLICITUDES = "SOLICITUDES!A1:BZ"
 HOJA_LIBRO = "1QoEY_5PYYidKlT2RNX_5m5Jq7-h-xfU_z6cZQ6pFSwE"
 PESTANA_LIBRO = "Base de Datos"
-NOTION_VERSION = "2022-06-28"
+# ⛔⛔ **2025-09-03, no 2022-06-28.** `notion_api.cuerpo_pagina` manda
+#    `parent = {"type": "data_source_id", …}`, que es la forma de las bases **multi-fuente**
+#    y **no existe** en `2022-06-28`, donde el padre es `database_id`. Con las dos en
+#    desacuerdo, el primer documento que se publique se va con un **400** — y no había dónde
+#    notarlo antes, porque el cuerpo se construye en un módulo y la cabecera se pone aquí.
+#    Lo ata un caso en `test_servicios.py`, que lee **las dos** cosas a la vez.
+# ⚠️ `scripts/sync-notion.mjs` se queda en `2022-06-28` **a propósito**: consulta
+#    `/v1/databases/{id}/query`, que es de esa época. Dos clientes, dos trabajos.
+# ⬜ **Lo único del pipeline que NO está medido contra la API viva.** Se comprueba con el
+#    primer `--aplicar` de verdad, o antes con:
+#      curl -s -X POST https://api.notion.com/v1/pages -H "Notion-Version: 2025-09-03" \n#           -H "Authorization: Bearer $NOTION_TOKEN" -H "Content-Type: application/json" \n#           -d '{"parent":{"type":"data_source_id","data_source_id":"<ID>"},"properties":{}}'
+NOTION_VERSION = "2025-09-03"
 NOTION_CREAR = "https://api.notion.com/v1/pages"
 NOTION_HIJOS = "https://api.notion.com/v1/blocks/%s/children"
+NOTION_FUENTE = "https://api.notion.com/v1/data_sources/%s"
 
 # ⚠️ Drive entero, no `readonly`: hay que CREAR la carpeta del expediente. Es el mismo
 #    alcance que ya piden `publish_temp_pdfs.py` y `fix_docx_publication_date.py`.
@@ -200,6 +212,9 @@ class Servicios(object):
         #    vive en `googleapiclient`, que el banco NO tiene instalado (y no debe: el paso de
         #    bancos del workflow corre ANTES del `pip install`).
         self._medio = medio or medio_en_memoria
+        # Las opciones de «Etiquetas», leídas UNA vez: una pasada de 40 expedientes no puede
+        # pedir el esquema 40 veces. `None` = todavía no se ha mirado; `[]` = se miró y no hay.
+        self._opc_etq = None
 
     @property
     def sheets(self):
@@ -274,6 +289,30 @@ class Servicios(object):
         raise SystemExit("`analizar` es el paso del modelo y no vive en el adaptador: hoy lo "
                          "sigue haciendo Cowork. Esta pasada NO debe marcarlo como hecho")
 
+    def opciones_etiquetas(self, fuente=None):
+        """Los nombres de las opciones que **ya tiene** «Etiquetas» en Notion. Lista, o `[]`.
+
+        ⛔ Sin esto, `notion_api.casar_etiquetas` no puede reusar nada y cada `Python` crea una
+        opción **al lado** de `python`. Medido: **7 de 48** etiquetas del modelo duplicaban una
+        existente sólo por la caja o una tilde, y la propiedad ya tiene **183 opciones**.
+        ⚠️ Si no se puede leer, devuelve `[]` y **no para la publicación**: publicar creando
+        alguna opción de más es recuperable; no publicar deja el documento fuera del índice.
+        """
+        if self._opc_etq is not None:
+            return self._opc_etq
+        ds = str(fuente or os.environ.get("NOTION_DATA_SOURCE_ID", "")).strip()
+        if not ds:
+            return []
+        try:
+            esquema = self._notion_get(NOTION_FUENTE % ds) or {}
+            prop = ((esquema.get("properties") or {}).get("Etiquetas") or {})
+            opciones = ((prop.get("multi_select") or {}).get("options") or [])
+            self._opc_etq = [str(o.get("name") or "").strip() for o in opciones
+                             if str(o.get("name") or "").strip()]
+        except Exception:
+            self._opc_etq = []
+        return self._opc_etq
+
     def publicar(self, fila):
         """Paso 5: crea la página en Notion y **devuelve su id** para que quede anotado.
 
@@ -284,9 +323,12 @@ class Servicios(object):
         props, motivos = PN.propiedades(fila)
         if motivos:
             raise SystemExit("no se publica: " + " | ".join(motivos))
-        cuerpo, avisos = NA.cuerpo_pagina(fila.get("notion_data_source_id") or
-                                          os.environ.get("NOTION_DATA_SOURCE_ID", ""),
-                                          props)
+        _fuente = (fila.get("notion_data_source_id") or
+                   os.environ.get("NOTION_DATA_SOURCE_ID", ""))
+        # ⛔ Con las opciones que YA hay: sin ellas, `casar_etiquetas` no puede reusar nada y
+        #    cada `Python` crea una opción al lado de `python`.
+        cuerpo, avisos = NA.cuerpo_pagina(
+            _fuente, props, opciones_etiquetas=self.opciones_etiquetas(_fuente))
         if cuerpo is None:
             raise SystemExit("no se publica: " + " | ".join(avisos))
         # ⛔ La CARPETA primero, y sólo si no la hay ya. Crearla dos veces deja dos carpetas
