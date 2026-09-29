@@ -74,7 +74,8 @@ ok(S.rango("", "A2") is None, u"sin pestaña no hay rango")
 # ── 4. El cuerpo ───────────────────────────────────────────────────────────────────────────
 cuerpo, motivos = S.cuerpo_batch("SOLICITUDES", [("AW2", "TRUE"), ("BX2", "2026-09-29")])
 ok(motivos == [], u"un cuerpo correcto no debería dar motivos: %r" % (motivos,))
-ok(cuerpo["valueInputOption"] == "RAW", u"el modo por defecto debería ser RAW")
+ok(cuerpo["valueInputOption"] == "USER_ENTERED",
+   u"el modo por defecto debería ser USER_ENTERED: las banderas son BOOLEANOS")
 ok(len(cuerpo["data"]) == 2, u"deberían viajar las dos celdas: %r" % (cuerpo["data"],))
 ok(cuerpo["data"][0] == {"range": u"SOLICITUDES!AW2", "values": [["TRUE"]]},
    u"la primera entrada no cuadra: %r" % (cuerpo["data"][0],))
@@ -119,8 +120,38 @@ cuerpo, motivos = S.cuerpo_batch("SOLICITUDES", [("A2", "x")], modo="USER_ENTERE
 ok(motivos == [] and cuerpo["valueInputOption"] == "USER_ENTERED",
    u"USER_ENTERED debería ser válido: %r" % (motivos,))
 ok(S.MODOS == ("RAW", "USER_ENTERED"), u"los modos ya no son los dos de la API")
-ok(S.MODO_POR_DEFECTO == "RAW",
-   u"el modo por defecto debería ser el que NO reinterpreta lo que se escribe")
+# ⛔⛔ MEDIDO el 29/09: las columnas de banderas guardan BOOLEANOS, no texto. Se vio por la
+#    alineación — `B2` (número) sale `RIGHT` y `A2`/`C2` (texto) salen `LEFT`, o sea que la
+#    herramienta informa de la EFECTIVA; y `AW3` (bandera) sale `CENTER` mientras sus vecinas
+#    inmediatas `AX3`/`AY3` (texto) salen `LEFT`, o sea que el centrado es POR TIPO y no un
+#    formato puesto al bloque. Con `RAW` quedaría un texto "TRUE" entre booleanos y cualquier
+#    COUNTIF de la hoja dejaría de contarlo, sin dar ningún error.
+ok(S.MODO_POR_DEFECTO == "USER_ENTERED",
+   u"el modo por defecto debe guardar BOOLEANOS, que es lo que hay en esas columnas")
+
+# ── 5. Lo que `USER_ENTERED` leería como fórmula ────────────────────────────────────
+for peligroso in ("=SUM(A1:A9)", "+A1", "@aqui", "=1+1", "  =A1  ", "-A1", "=BORRA()"):
+    ok(S.es_formula(peligroso), u"%r debería leerse como fórmula" % peligroso)
+# ⚠️ Lo que PARECE una fórmula y no lo es: cualquier cosa que Sheets entienda como NÚMERO acaba
+#    siendo el número que aparenta — `-3` y también `+1`, que entra como el 1. Rechazarlos sería un
+#    falso rojo sobre valores normales, y una guarda que griñe por lo correcto se acaba quitando.
+for bueno in ("-3", "-3.5", "-0", "+1", "+2.5", 5, -5, -2.5, "TRUE", "", None, "hola", "a=b",
+              True, False):
+    ok(not S.es_formula(bueno), u"%r NO debería leerse como fórmula" % (bueno,))
+
+cuerpo, motivos = S.cuerpo_batch("SOLICITUDES", [("AW2", "TRUE"), ("BY2", "=BORRA()")])
+ok(cuerpo is None, u"¡manda un valor que Sheets guardaría como FÓRMULA!")
+ok(any("FÓRMULA" in m for m in motivos), u"el motivo no lo explica: %r" % (motivos,))
+ok(any("BY2" in m for m in motivos), u"el motivo no dice en qué celda")
+
+# Con RAW no hay fórmulas que valgan: se guarda tal cual.
+cuerpo, motivos = S.cuerpo_batch("SOLICITUDES", [("BY2", "=BORRA()")], modo="RAW")
+ok(motivos == [], u"con RAW un texto que empieza por = es sólo texto: %r" % (motivos,))
+
+# Y un error normal, que es el caso que de verdad viaja por ahí, pasa sin problema.
+cuerpo, motivos = S.cuerpo_batch(
+    "SOLICITUDES", [("BY2", "RuntimeError: la hoja contestó 503")])
+ok(motivos == [], u"un mensaje de error normal no debería rechazarse: %r" % (motivos,))
 
 print("%d comprobaciones" % hechas[0])
 if fallos:

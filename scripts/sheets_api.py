@@ -13,16 +13,25 @@ Dos trampas, las dos medidas
    `values: [[x]]` contra una columna entera no da error: escribe en su primera celda. Por eso
    aquí una referencia que no tenga la forma `<LETRAS><NÚMERO≥2>` **no se manda**.
 
-La pregunta abierta, escrita en vez de adivinada
------------------------------------------------
-⚠️ `valueInputOption` decide si `"TRUE"` entra como **texto** (`RAW`) o Sheets lo convierte en el
-**booleano** `TRUE` (`USER_ENTERED`). No se ha podido medir cómo están hoy las columnas de
-banderas: el conector devuelve `"TRUE"` en los dos casos, porque convierte a texto al leer.
+3. ⛔⛔ **Las columnas de banderas guardan BOOLEANOS, no texto — y eso decide
+   `valueInputOption`.** Con `RAW`, la cadena `"TRUE"` entra como **texto** y quedaría un texto
+   entre booleanos: `es_si` de nuestro lado lo aceptaría igual, pero cualquier `COUNTIF(rango;
+   VERDADERO)` montado sobre la hoja **dejaría de contarlo**, y sin dar ningún error.
 
-Por defecto va **`RAW`**, que escribe exactamente lo que se le da y es la opción que no
-reinterpreta nada. Si resulta que las columnas guardan booleanos de verdad, hay que pasar
-`USER_ENTERED` — y conviene saberlo antes de la primera pasada con `--aplicar`, porque una
-columna con las dos cosas mezcladas rompe cualquier `COUNTIF` que haya montado encima.
+   📏 **Cómo se midió, porque no era obvio**: el conector devuelve `"TRUE"` tanto si es
+   booleano como si es texto. Se miró la **alineación**: `B2` (un número) sale `RIGHT` y `A2`/`C2`
+   (texto) salen `LEFT` — o sea que la herramienta informa de la alineación **efectiva**, defectos
+   incluidos, aunque su descripción diga que sólo devuelve lo aplicado a mano. Y `AW3` (bandera)
+   sale `CENTER` mientras sus **vecinas inmediatas** `AX3`/`AY3` (identificadores de texto) salen
+   `LEFT`: el centrado es **por tipo de celda**, no un formato puesto al bloque. `CENTER` es el
+   defecto de un booleano.
+
+   ✅ Por eso el modo por defecto es **`USER_ENTERED`**.
+
+   ⚠️ **Y `USER_ENTERED` trae su propio filo**: un texto que empiece por `=`, `+`, `-` o `@` lo
+   interpreta como **fórmula**. Un `last_error` que empezara así no se guardaría como el mensaje
+   que es. Por eso se rechaza — no se escapa a escondidas: escapar cambiaría lo que se guarda sin
+   decirlo, y quien lea la celda no sabría que no es lo que se escribió.
 
 Cómo se prueba
 --------------
@@ -39,11 +48,35 @@ for _f in (sys.stdout, sys.stderr):
 
 
 MODOS = ("RAW", "USER_ENTERED")
-MODO_POR_DEFECTO = "RAW"
+MODO_POR_DEFECTO = "USER_ENTERED"
 
 # ⛔ Fila **2 o mayor**: la 1 es la cabecera y escribir ahí renombra columnas. Y el `$` del final
 #    es lo que impide que `A2:B9` o `A:A` se cuelen como si fueran una celda.
 _CELDA = re.compile(r"^[A-Z]{1,3}[2-9][0-9]*$|^[A-Z]{1,3}[1-9][0-9]+$")
+
+
+# ⚠️ Los cuatro caracteres con los que Sheets empieza a leer una fórmula.
+_ARRANQUES = ("=", "+", "-", "@")
+
+
+def es_formula(valor):
+    """¿Este valor lo leería Sheets como una fórmula con `USER_ENTERED`?
+
+    ⚠️ Un número negativo (`-3`, `-3.5`) **no** lo es: empieza por `-` pero Sheets lo entiende
+    como el número que es. Rechazarlo sería un falso rojo sobre un valor perfectamente normal,
+    y una guarda que griñe por lo correcto se acaba quitando.
+    """
+    # (sin el `isinstance` de números que había aquí: el `float()` de abajo ya los deja pasar,
+    #  así que la condición no podía cambiar el resultado y salía ciega al mutarla. Es la tercera
+    #  vez esta noche con esta forma: una guarda defensiva que otra rama de más abajo ya cubre.)
+    t = str(valor if valor is not None else "").strip()
+    if not t or t[0] not in _ARRANQUES:
+        return False
+    try:
+        float(t)
+    except ValueError:
+        return True
+    return False
 
 
 def es_celda(a1):
@@ -98,6 +131,10 @@ def cuerpo_batch(pestana, celdas, modo=MODO_POR_DEFECTO):
         if not es_celda(a1):
             motivos.append(u"%r no es una celda de datos: un rango así no falla, escribe donde "
                            u"no toca (la cabecera, o la primera celda de la columna entera)" % (a1,))
+            continue
+        if modo == "USER_ENTERED" and es_formula(valor):
+            motivos.append(u"el valor de %s empieza por %r y Sheets lo guardaría como FÓRMULA, no "
+                           u"como el texto que es: %r" % (a1, str(valor).strip()[0], valor))
             continue
         # (sin `.upper()`: `es_celda` ya ha rechazado la minúscula un par de líneas antes,
         #  así que normalizar la caja aquí no puede cambiar el resultado — y una condición
