@@ -243,9 +243,17 @@ def correr(argv, servicios, ahora=None):
     except Exception as e:
         return u"al leer la hoja: %s: %s" % (type(e).__name__, e), 2
 
-    # ⛔⛔ EL PASO 1. Va ANTES del reparto a propósito: lo que se acaba de ingerir entra en la
-    #    misma pasada, y si no, una respuesta nueva espera a la vuelta siguiente — que es
-    #    exactamente lo que hacía que una enviada a las 23:48 siguiera ahí por la mañana.
+    # ⛔⛔ EL PASO 1 — Y ESTE COMENTARIO MENTÍA, lo tumbó un agente el 30/09.
+    #    Decía que «lo que se acaba de ingerir entra en la MISMA pasada». **Es falso**: las
+    #    dos ramas de aquí abajo **RETORNAN**, así que `--ingerir` nunca llega a `PA.correr`.
+    #    Y `pipeline.yml` hace lo mismo: el interruptor `ingerir` excluye los argumentos de
+    #    la pasada. O sea que el código y el workflow son coherentes — el que estaba solo era
+    #    el comentario, prometiendo una garantía que nadie da.
+    #    ⚠️ **El daño real son DOS MINUTOS, no doce horas**: lo recién ingerido lo coge la
+    #       vuelta siguiente del gate. Las doce horas de la respuesta de las 23:48 eran de
+    #       cuando la ingesta **no la llamaba nadie**, que es otra cosa y ya está arreglada.
+    #    ⬜ Encadenarlas de verdad es una mejora con su propia ficha: pide **releer**
+    #       `SOLICITUDES` tras escribir, porque las filas nuevas no están en lo ya leído.
     #    ⚠️ Y es **seco** salvo `--aplicar`, como todo lo demás: añadir filas a `SOLICITUDES`
     #       no tiene deshacer.
     if op["ingerir"]:

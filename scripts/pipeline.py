@@ -90,6 +90,20 @@ def _falta_el_pdf(fila):
     return nombre.endswith(".docx")
 
 
+def cadena_de(filas):
+    """Las reentregas que ya llegaron, `{clave: quién}`. **La Única puerta.**
+
+    ⛔ Existía calculada en `reparto` y **NADIE MÁS LA PASABA**: `ejecutor.ejecutar_una` llamaba
+    a `siguiente(fila)` a secas, así que `quien_sustituye(fila, None)` daba **siempre** `None` y
+    la rama «la reentrega YA llegó» era **inalcanzable en producción**. El arreglo estaba
+    escrito, con su banco en verde, y **muerto en el cable de en medio** — sin dar un solo
+    síntoma, porque REENVIO es una respuesta perfectamente razonable y falsa.
+    ⚠️ Por eso vive aquí y no en cada llamante: dos sitios calculando esto acaban en dos
+    criterios, y el segundo nace ciego.
+    """
+    return SU.sustituidas(filas)
+
+
 def siguiente(fila, cadena=None):
     """`(acción, por_qué)` para un expediente. Nunca lanza; una fila rara devuelve `REVISAR`.
 
@@ -213,7 +227,7 @@ def reparto(filas):
     fuera = dict((a, []) for a in ACCIONES)
     # ⚠️ La cadena se calcula AQUÍ, una vez. Pedírsela al que llama es pedirle que se acuerde,
     #    y el que no se acuerde tendrá el fallo de vuelta: filas esperando para siempre.
-    cadena = SU.sustituidas(filas)
+    cadena = cadena_de(filas)
     for i, f in enumerate(filas):
         n = i + 2
         rid = u"(sin request_id)"

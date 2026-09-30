@@ -102,7 +102,7 @@ class Resultado(object):
         return "<%s fila %s %s %s>" % (estado, self.n, self.request_id, self.accion)
 
 
-def ejecutar_una(fila, servicios, n=0, aplicar=False):
+def ejecutar_una(fila, servicios, n=0, aplicar=False, cadena=None):
     """Hace lo que toque con UNA fila. Nunca lanza: un fallo se devuelve, no se propaga.
 
     ⛔ Que no lance es parte del diseño, no descuido. Una pasada recorre decenas de expedientes y
@@ -113,7 +113,10 @@ def ejecutar_una(fila, servicios, n=0, aplicar=False):
     if isinstance(fila, dict):
         rid = str(fila.get("request_id") or "").strip() or rid
 
-    accion, porque = P.siguiente(fila)
+    # ⛔⛔ CON LA CADENA. Sin ella, `quien_sustituye(fila, None)` devuelve siempre `None` y
+    #    la rama «pidió cambios y la reentrega YA llegó» no se alcanza NUNCA. Medido el 29/09:
+    #    **3 de las 4** filas esperando un reenvío ya lo habían recibido.
+    accion, porque = P.siguiente(fila, cadena)
 
     # ⛔ ANOTAR no llama a nadie: el trabajo ya está hecho y lo único que falta es la marca.
     #    Por eso va ANTES del mapa de servicios y no tiene entrada en él: no hay nada que ejecutar,
@@ -176,7 +179,11 @@ def pasada(filas, servicios, aplicar=False):
     ⚠️ Devuelve **uno por fila**, también por las que no hacen nada. Un informe que sólo trae lo
     que se tocó no deja distinguir «no había nada que hacer» de «esta fila ni se miró».
     """
-    return [ejecutar_una(f, servicios, n=i + 2, aplicar=aplicar)
+    # ⚠️ La cadena se calcula AQUÍ, UNA vez y para todas: pedirla al que llama es pedirle
+    #    que se acuerde, y el que no se acuerde tendrá el fallo de vuelta — filas esperando
+    #    para siempre un reenvío que ya llegó.
+    cadena = P.cadena_de(filas)
+    return [ejecutar_una(f, servicios, n=i + 2, aplicar=aplicar, cadena=cadena)
             for i, f in enumerate(filas)]
 
 

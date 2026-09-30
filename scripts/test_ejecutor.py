@@ -280,6 +280,35 @@ except KeyboardInterrupt:
 ok(_subio is True,
    u"⛔ se traga el Ctrl-C: la pasada seguiría corriendo sin forma de pararla a mano")
 
+# ── ⛔⛔ LA CADENA DE REENTREGAS NO LLEGABA A `siguiente` ─────────────────────────
+# `pipeline.siguiente(fila, cadena)` sabe decir «pidió cambios y la reentrega YA llegó» — el fallo
+# medido el 29/09, donde **3 de las 4** filas que esperaban un reenvío ya lo habían recibido y el
+# pipeline las dejaba esperando **para siempre**. Pero `ejecutar_una` llamaba `P.siguiente(fila)`
+# **sin la cadena**, así que `quien_sustituye(fila, None)` devolvía **siempre** `None` y esa rama
+# era **INALCANZABLE EN PRODUCCIÓN**: el arreglo estaba escrito, probado por su banco, y muerto en
+# el cable de en medio. Lo tumbó un agente al que sólo se le pidió refutar.
+# ⚠️ Y no daba ningún síntoma: el pipeline seguía contestando REENVIO, que es una respuesta
+#    perfectamente razonable — y falsa.
+_ESPERA = {"request_id": "SOL-VIEJA", "reference": "Informe_S-6009_26", "received": T,
+           "analyzed": T, "changes_requested": T}
+_REENTREGA = {"request_id": "SOL-NUEVA", "reference": "Informe_S-6009_26", "received": T,
+              "analyzed": T, "replaces_document": "SOL-VIEJA",
+              "replacement_reference": "Informe_S-6009_26", "replacement_reason": "erratas"}
+
+d = Doble()
+rs = E.pasada([_ESPERA, _REENTREGA], d, aplicar=False)
+ok(rs[0].accion == P.REVISAR,
+   u"⛔⛔ la fila que YA recibió su reentrega sigue en %r: la cadena no llega a `siguiente` y "
+   u"esa fila espera PARA SIEMPRE algo que ya pasó" % (rs[0].accion,))
+ok("SOL-NUEVA" in (rs[0].porque or ""),
+   u"el motivo no dice QUIÉN la reentregó, que es lo único accionable: %r" % (rs[0].porque,))
+# ⚠️ Y la reentrega NO se marca a sí misma como sustituida: se entierra sola.
+ok(rs[1].accion != P.REVISAR or "reentrega YA" not in (rs[1].porque or ""),
+   u"⛔ la propia reentrega se da por sustituida: %r" % (rs[1].porque,))
+# ⚠️ Y sin cadena que calcular, una pasada normal no cambia de comportamiento.
+ok(E.pasada([POR_CERRAR], Doble(), aplicar=False)[0].accion == P.CERRAR,
+   u"una fila sin nada de sustitución debería seguir igual")
+
 # Un servicio que no existe se dice, no se traga.
 class Manco(object):
     def analizar(self, f):
@@ -326,7 +355,9 @@ ok([r.n for r in rs] == [2, 3, 4], "las filas pierden su numeración al saltarse
 #    ⚠️ El parcheo se deshace en un `finally`: un monkeypatch que se escapa deja rojos ajenos.
 _orig_siguiente = P.siguiente
 try:
-    P.siguiente = lambda f: ("accion_que_nadie_atiende", u"inventada")
+    # ⚠️ El doble acepta la CADENA igual que el real: uno mas pobre que el original habria
+    #    reventado con un TypeError en vez de medir lo que este caso mide.
+    P.siguiente = lambda f, c=None: ("accion_que_nadie_atiende", u"inventada")
     r = E.ejecutar_una(POR_CERRAR, Doble(), aplicar=True)
     ok(r.error is not None, "una acción que nadie atiende pasa callando")
     ok(r.error and "accion_que_nadie_atiende" in r.error,
